@@ -11,10 +11,10 @@ testable without a real screen.
 - [x] `cargo check --target x86_64-pc-windows-msvc` wired into CI from day one
 
 ## F-1.2 — Capture & encode abstractions
-- [ ] `FrameSource` trait (async frame stream, BGRA + timestamp)
-- [ ] `Encoder` trait (frame in → encoded packet out, keyframe flag exposed)
-- [ ] `TestPatternSource`: synthetic 60 fps source with frame numbers embedded
-- [ ] Unit tests: source→encoder pipeline produces monotonic timestamps
+- [x] `FrameSource` trait (async frame stream, BGRA + timestamp)
+- [x] `Encoder` trait (frame in → encoded packet out, keyframe flag exposed)
+- [x] `TestPatternSource`: synthetic 60 fps source with frame numbers embedded
+- [x] Unit tests: source→encoder pipeline produces monotonic timestamps
 
 ## F-1.3 — macOS capture (ScreenCaptureKit)
 - [ ] `ScreenCaptureKitSource` implements `FrameSource` for the main display
