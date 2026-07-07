@@ -2,6 +2,8 @@
 //! synthetic [`test_pattern::TestPatternSource`] so the whole pipeline is
 //! testable without a real screen.
 
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod test_pattern;
 
 use std::time::Duration;
