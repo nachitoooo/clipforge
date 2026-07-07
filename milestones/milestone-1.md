@@ -17,10 +17,11 @@ testable without a real screen.
 - [x] Unit tests: source→encoder pipeline produces monotonic timestamps
 
 ## F-1.3 — macOS capture (ScreenCaptureKit)
-- [ ] `ScreenCaptureKitSource` implements `FrameSource` for the main display
-- [ ] Screen-recording permission flow handled (clear error when denied)
-- [ ] Ignored integration test `macos_capture_smoke`: captures 3 s of real screen
-- [ ] Frame drop rate < 1% at 1080p60 on this Mac (measured, logged)
+- [x] `ScreenCaptureKitSource` implements `FrameSource` for the main display
+- [x] Screen-recording permission flow handled (clear error when denied)
+- [x] Ignored integration test `macos_capture_smoke`: captures 3 s of real screen
+- [x] Frame drop rate < 1% at 1080p60 on this Mac (measured, logged)
+  — measured 2026-07-07: 167 frames / 3 s (55.7 fps at native display res), 0 dropped (0.00%)
 
 ## F-1.4 — macOS hardware encoding (VideoToolbox)
 - [ ] `VideoToolboxEncoder` implements `Encoder` (H.264, hardware-only)
