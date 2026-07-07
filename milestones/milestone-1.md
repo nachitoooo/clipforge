@@ -5,10 +5,10 @@ macOS, hardware-encode it, and write a valid .mp4 — with the whole pipeline
 testable without a real screen.
 
 ## F-1.1 — Repo bootstrap
-- [ ] Cargo workspace with `clipforge-core` crate compiles (`cargo build`)
-- [ ] Tauri 2 app scaffold in `app/` runs (`npm run tauri dev` opens a window)
-- [ ] CI: GitHub Actions matrix (macos-latest, windows-latest) runs `cargo test`
-- [ ] `cargo check --target x86_64-pc-windows-msvc` wired into CI from day one
+- [x] Cargo workspace with `clipforge-core` crate compiles (`cargo build`)
+- [x] Tauri 2 app scaffold in `app/` runs (`npm run tauri dev` opens a window)
+- [x] CI: GitHub Actions matrix (macos-latest, windows-latest) runs `cargo test`
+- [x] `cargo check --target x86_64-pc-windows-msvc` wired into CI from day one
 
 ## F-1.2 — Capture & encode abstractions
 - [ ] `FrameSource` trait (async frame stream, BGRA + timestamp)

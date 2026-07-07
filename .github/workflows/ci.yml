@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Core engine tests
+        run: cargo test -p clipforge-core
+
+      - name: Workspace check
+        run: cargo check --workspace
+
+      # Ignored platform-specific integration tests run only on the matching
+      # OS (they need a real screen/encoder; skipped gracefully in CI if the
+      # environment can't capture).
+      - name: Clippy
+        run: |
+          rustup component add clippy
+          cargo clippy -p clipforge-core -- -D warnings
+
+  windows-cross-check:
+    name: Windows cross-check from macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable + windows target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Check only (no link): keeps the Windows capture/encode path compiling
+      # even though development happens on macOS.
+      - name: Cross-check core for Windows
+        run: cargo check -p clipforge-core --target x86_64-pc-windows-msvc
