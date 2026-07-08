@@ -5,66 +5,9 @@
 use std::time::Duration;
 
 use clipforge_core::capture::test_pattern::{TestPatternConfig, TestPatternSource};
-use clipforge_core::capture::{FrameSource, RawFrame};
-use clipforge_core::encode::{EncodeError, EncodedPacket, Encoder, EncoderConfig, ParameterSets};
-
-/// Deterministic stand-in for a hardware encoder: emits one packet per frame,
-/// keyframes on the configured GOP boundary, and mimics hardware pipelining
-/// by holding each packet back until the next `encode`/`finish` call.
-struct MockEncoder {
-    config: EncoderConfig,
-    pending: Option<EncodedPacket>,
-    finished: bool,
-    frames_in: u64,
-}
-
-impl MockEncoder {
-    fn new(config: EncoderConfig) -> Self {
-        Self {
-            config,
-            pending: None,
-            finished: false,
-            frames_in: 0,
-        }
-    }
-}
-
-impl Encoder for MockEncoder {
-    fn encode(&mut self, frame: &RawFrame) -> Result<Vec<EncodedPacket>, EncodeError> {
-        if self.finished {
-            return Err(EncodeError::Backend("encode after finish".into()));
-        }
-        if frame.width != self.config.width || frame.height != self.config.height {
-            return Err(EncodeError::BadFrame(format!(
-                "{}x{} frame for {}x{} encoder",
-                frame.width, frame.height, self.config.width, self.config.height
-            )));
-        }
-        let packet = EncodedPacket {
-            data: frame.frame_number.to_le_bytes().to_vec(),
-            pts: frame.timestamp,
-            dts: frame.timestamp,
-            is_keyframe: self
-                .frames_in
-                .is_multiple_of(self.config.keyframe_interval as u64),
-        };
-        self.frames_in += 1;
-        Ok(self.pending.replace(packet).into_iter().collect())
-    }
-
-    fn finish(&mut self) -> Result<Vec<EncodedPacket>, EncodeError> {
-        self.finished = true;
-        Ok(self.pending.take().into_iter().collect())
-    }
-
-    fn parameter_sets(&self) -> Option<ParameterSets> {
-        (self.frames_in > 0).then(ParameterSets::default)
-    }
-
-    fn config(&self) -> &EncoderConfig {
-        &self.config
-    }
-}
+use clipforge_core::capture::FrameSource;
+use clipforge_core::encode::mock::MockEncoder;
+use clipforge_core::encode::{EncodeError, EncodedPacket, Encoder, EncoderConfig};
 
 /// Run `frames` test-pattern frames through an encoder and collect packets.
 async fn run_pipeline(frames: u64, config: EncoderConfig) -> Vec<EncodedPacket> {

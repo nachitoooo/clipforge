@@ -9,3 +9,4 @@ pub mod buffer;
 pub mod capture;
 pub mod clip;
 pub mod encode;
+pub mod engine;
