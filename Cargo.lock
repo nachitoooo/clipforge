@@ -502,6 +502,7 @@ version = "0.1.0"
 dependencies = [
  "apple-cf",
  "bytes",
+ "chrono",
  "mp4",
  "screencapturekit",
  "thiserror 2.0.18",
