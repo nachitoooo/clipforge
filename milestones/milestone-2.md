@@ -11,10 +11,12 @@ last N seconds in memory, and a global hotkey saves them as a clip file.
   — measured 2026-07-07: peak 182 MiB for the 120 s window (budget 256 MiB)
 
 ## F-2.2 — Clip extraction
-- [ ] "Save last N seconds" extracts from buffer and remuxes to .mp4 (no re-encode)
-- [ ] Clip saved to configurable clips folder with timestamped filename
-- [ ] Extraction under 500 ms for a 30 s clip (measured)
-- [ ] Capture keeps running uninterrupted during extraction
+- [x] "Save last N seconds" extracts from buffer and remuxes to .mp4 (no re-encode)
+- [x] Clip saved to configurable clips folder with timestamped filename
+- [x] Extraction under 500 ms for a 30 s clip (measured)
+  — measured 2026-07-07: 16.9 ms for a 30 s / 41 MiB clip (1920 packets)
+- [x] Capture keeps running uninterrupted during extraction
+  — measured 2026-07-07: worst push wait 8 ms across 71 concurrent saves
 
 ## F-2.3 — Global hotkey & background mode
 - [ ] Global hotkey (default configurable) triggers clip save from any app/game
