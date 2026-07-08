@@ -5,6 +5,14 @@ they come up (see CLAUDE.md → Improvement Backlog).
 
 ---
 
+## Sidebar layout: Recientes / Biblioteca / Configuración
+- **Related to:** Milestone 3 (UI)
+- **Why:** Ignacio's target layout for the app (Medal-style navigation).
+- **Details:** left sidebar with (top→bottom): a "clips recientes" icon showing
+  clips as they are generated; a "biblioteca" icon that will later organize
+  clips into folders; pinned at the bottom, the settings (configuración) icon.
+- **Added:** 2026-07-07
+
 ## Embed libobs as capture/encode engine
 - **Related to:** F-1.3, F-1.4, F-2.4 (alternative implementation)
 - **Why:** libobs (the OBS engine, C API callable from Rust) ships a
