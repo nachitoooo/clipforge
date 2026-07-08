@@ -27,6 +27,9 @@ jobs:
       - name: Core engine tests
         run: cargo test -p clipforge-core
 
+      - name: App unit tests (hotkey/tray dispatch)
+        run: cargo test -p clipforge-app --lib
+
       - name: Workspace check
         run: cargo check --workspace
 

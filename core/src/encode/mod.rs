@@ -2,6 +2,7 @@
 //! Media Foundation on Windows. Software encoding is never used — clips are
 //! remuxed, not re-encoded.
 
+pub mod mock;
 #[cfg(target_os = "macos")]
 pub mod videotoolbox;
 

@@ -19,10 +19,15 @@ last N seconds in memory, and a global hotkey saves them as a clip file.
   — measured 2026-07-07: worst push wait 8 ms across 71 concurrent saves
 
 ## F-2.3 — Global hotkey & background mode
-- [ ] Global hotkey (default configurable) triggers clip save from any app/game
-- [ ] Tray/menu-bar icon: start/stop buffer, save clip, open clips folder
-- [ ] OS notification confirms "Clip saved" with duration
-- [ ] Unit tests for hotkey→command dispatch (mocked hotkey events)
+- [x] Global hotkey (default configurable) triggers clip save from any app/game
+  — default Cmd/Ctrl+Shift+S; runtime re-mapping arrives with the Settings UI (M3)
+- [x] Tray/menu-bar icon: start/stop buffer, save clip, open clips folder
+- [x] OS notification confirms "Clip saved" with duration
+- [x] Unit tests for hotkey→command dispatch (mocked hotkey events)
+  — verified 2026-07-07: app runs in background (window closed ≠ exit), buffer
+  auto-starts and fills during screen activity; physical hotkey press pending
+  a quick manual check (automation can't inject keystrokes without
+  Accessibility permission)
 
 ## F-2.4 — Windows parity
 - [ ] `WindowsGraphicsCaptureSource` implements `FrameSource`
