@@ -4,10 +4,11 @@
 last N seconds in memory, and a global hotkey saves them as a clip file.
 
 ## F-2.1 — Encoded ring buffer
-- [ ] Ring buffer stores encoded packets, bounded by configured duration (default 120 s)
-- [ ] Eviction is GOP-aligned: buffer always starts at a keyframe
-- [ ] Property tests: wraparound, exact-duration extraction, empty buffer, clock jumps
-- [ ] Memory stays under budget for 2 min of 1080p60 (measured in test)
+- [x] Ring buffer stores encoded packets, bounded by configured duration (default 120 s)
+- [x] Eviction is GOP-aligned: buffer always starts at a keyframe
+- [x] Property tests: wraparound, exact-duration extraction, empty buffer, clock jumps
+- [x] Memory stays under budget for 2 min of 1080p60 (measured in test)
+  — measured 2026-07-07: peak 182 MiB for the 120 s window (budget 256 MiB)
 
 ## F-2.2 — Clip extraction
 - [ ] "Save last N seconds" extracts from buffer and remuxes to .mp4 (no re-encode)
