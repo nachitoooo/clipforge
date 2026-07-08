@@ -6,11 +6,16 @@ license.workspace = true
 description = "ClipForge core engine: capture, encode, ring buffer, clip extraction"
 
 [dependencies]
+bytes = "1"
+mp4 = "0.14"
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+apple-cf = { version = "0.9", default-features = false, features = ["cm", "cv", "iosurface"] }
 screencapturekit = "8.0"
+videotoolbox = "0.18"
 
 [dev-dependencies]
+mp4 = "0.14"
 tokio = { version = "1", features = ["full", "test-util"] }

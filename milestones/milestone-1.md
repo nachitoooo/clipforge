@@ -4,6 +4,8 @@
 macOS, hardware-encode it, and write a valid .mp4 — with the whole pipeline
 testable without a real screen.
 
+> **Status:** COMPLETED (2026-07-07)
+
 ## F-1.1 — Repo bootstrap
 - [x] Cargo workspace with `clipforge-core` crate compiles (`cargo build`)
 - [x] Tauri 2 app scaffold in `app/` runs (`npm run tauri dev` opens a window)
@@ -24,7 +26,8 @@ testable without a real screen.
   — measured 2026-07-07: 167 frames / 3 s (55.7 fps at native display res), 0 dropped (0.00%)
 
 ## F-1.4 — macOS hardware encoding (VideoToolbox)
-- [ ] `VideoToolboxEncoder` implements `Encoder` (H.264, hardware-only)
-- [ ] Encoded stream muxed to a valid .mp4 (plays in QuickTime)
-- [ ] End-to-end test: TestPatternSource → encoder → mp4, duration matches
-- [ ] Configurable bitrate/fps; sane 1080p60 defaults documented
+- [x] `VideoToolboxEncoder` implements `Encoder` (H.264, hardware-only)
+- [x] Encoded stream muxed to a valid .mp4 (plays in QuickTime)
+  — verified 2026-07-07 via AVFoundation: playable=true, 2.0 s, 1280x720@60
+- [x] End-to-end test: TestPatternSource → encoder → mp4, duration matches
+- [x] Configurable bitrate/fps; sane 1080p60 defaults documented

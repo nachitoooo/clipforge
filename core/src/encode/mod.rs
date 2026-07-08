@@ -2,6 +2,9 @@
 //! Media Foundation on Windows. Software encoding is never used — clips are
 //! remuxed, not re-encoded.
 
+#[cfg(target_os = "macos")]
+pub mod videotoolbox;
+
 use std::time::Duration;
 
 use thiserror::Error;
