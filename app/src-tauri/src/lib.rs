@@ -1,11 +1,12 @@
 mod dispatch;
+mod library;
 mod recorder;
 
 use dispatch::{dispatch, Actions, Command};
-use recorder::{Recorder, DEFAULT_CLIP_SECONDS};
+use recorder::{BufferStatus, Recorder, DEFAULT_CLIP_SECONDS};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
@@ -29,6 +30,12 @@ impl AppActions {
     fn recorder(&self) -> tauri::State<'_, Recorder> {
         self.app.state::<Recorder>()
     }
+
+    fn emit_buffer_status(&self) {
+        self.app
+            .emit("buffer-changed", self.recorder().status())
+            .ok();
+    }
 }
 
 impl Actions for AppActions {
@@ -37,24 +44,28 @@ impl Actions for AppActions {
     }
 
     fn start_buffer(&self) -> Result<(), String> {
-        self.recorder().start()
+        let result = self.recorder().start();
+        // Remember a failure so a UI that loads later can still explain it.
+        self.recorder().record_start_result(&result);
+        self.emit_buffer_status();
+        result
     }
 
     fn stop_buffer(&self) {
         self.recorder().stop();
+        self.emit_buffer_status();
     }
 
     fn save_clip(&self) -> Result<String, String> {
         let saved = self.recorder().save_clip(DEFAULT_CLIP_SECONDS)?;
-        Ok(format!(
-            "{:.0} s → {}",
-            saved.duration.as_secs_f64(),
-            saved
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        ))
+        let name = saved
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // The gallery refreshes itself on this event (F-3.1 "live update").
+        self.app.emit("clip-saved", &name).ok();
+        Ok(format!("{:.0} s → {name}", saved.duration.as_secs_f64()))
     }
 
     fn open_clips_folder(&self) {
@@ -94,8 +105,8 @@ fn run_command(app: &AppHandle, command: Command) {
 // ---- Commands for the UI (Milestone 3 sidebar consumes these) ----
 
 #[tauri::command]
-fn buffer_running(recorder: tauri::State<'_, Recorder>) -> bool {
-    recorder.is_running()
+fn buffer_status(recorder: tauri::State<'_, Recorder>) -> BufferStatus {
+    recorder.status()
 }
 
 #[tauri::command]
@@ -111,6 +122,37 @@ fn save_clip(app: AppHandle) {
 #[tauri::command]
 fn open_clips_folder(app: AppHandle) {
     run_command(&app, Command::OpenClipsFolder);
+}
+
+#[tauri::command]
+fn list_clips(recorder: tauri::State<'_, Recorder>) -> Result<Vec<library::ClipInfo>, String> {
+    library::list_clips(&recorder.clips_dir())
+}
+
+#[tauri::command]
+fn rename_clip(
+    recorder: tauri::State<'_, Recorder>,
+    name: String,
+    new_name: String,
+) -> Result<String, String> {
+    library::rename_clip(&recorder.clips_dir(), &name, &new_name)
+}
+
+#[tauri::command]
+fn delete_clip(recorder: tauri::State<'_, Recorder>, name: String) -> Result<(), String> {
+    library::delete_clip(&recorder.clips_dir(), &name)
+}
+
+#[tauri::command]
+fn reveal_clip(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    name: String,
+) -> Result<(), String> {
+    let path = library::clip_path(&recorder.clips_dir(), &name)?;
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|e| format!("no se pudo abrir la carpeta: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -129,10 +171,14 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
-            buffer_running,
+            buffer_status,
             toggle_buffer,
             save_clip,
-            open_clips_folder
+            open_clips_folder,
+            list_clips,
+            rename_clip,
+            delete_clip,
+            reveal_clip
         ])
         .setup(|app| {
             // Clips folder: ~/Movies/ClipForge (or the OS video dir).

@@ -11,6 +11,9 @@ they come up (see CLAUDE.md → Improvement Backlog).
 - **Details:** left sidebar with (top→bottom): a "clips recientes" icon showing
   clips as they are generated; a "biblioteca" icon that will later organize
   clips into folders; pinned at the bottom, the settings (configuración) icon.
+- **Status (2026-10-09):** sidebar shell built in `feat/3/clips-gallery`
+  (Recientes = gallery; Biblioteca and Configuración are "Próximamente"
+  placeholders until folders and F-3.3 exist).
 - **Added:** 2026-07-07
 
 ## Embed libobs as capture/encode engine
@@ -37,4 +40,6 @@ they come up (see CLAUDE.md → Improvement Backlog).
   track lets users mute themselves after the fact.
 - **Details:** audio capture per OS (WASAPI loopback / ScreenCaptureKit audio),
   encode AAC, mux as separate tracks.
+- **Status (2026-10-09):** Ignacio asked about it again — clips are silent
+  today. Candidate to promote into a milestone before Biblioteca/Settings.
 - **Added:** 2026-07-07

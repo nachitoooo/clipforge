@@ -4,6 +4,10 @@
 app settings.
 
 ## F-3.1 — Clips gallery
+> **Progress (2026-10-09, branch `feat/3/clips-gallery`):** implemented and
+> covered by unit tests (`library.rs` in Rust; `lib/*.test.ts` via `npm test`).
+> Boxes stay open until each item is checked by hand in the running app — the
+> thumbnails, playback and live-update paths have only been compiled, not seen.
 - [ ] Grid of saved clips with auto-generated thumbnails
 - [ ] Inline playback (click to preview)
 - [ ] Delete / reveal-in-folder / rename actions
