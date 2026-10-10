@@ -46,3 +46,14 @@ they come up (see CLAUDE.md → Improvement Backlog).
   separate track, configurable in Settings). Echo/noise handling is in the
   settings roadmap (wave 3).
 - **Added:** 2026-07-07
+
+## More settings ideas
+- **Related to:** F-3.5 – F-3.8 (settings waves)
+- **Why:** the settings roadmap covered the obvious settings; these are the
+  ones that came up when asking "what else could go in Configuración".
+- **Details:** full list with effort and notes in `docs/settings-roadmap.md`
+  → "Ideas pool". Four of them were promoted to wave 1 (post-roll, pause the
+  buffer + tray state, push-to-talk, show/hide cursor). Open decision: a size
+  cap for sharing (Discord limits) needs re-encoding, which `CLAUDE.md` forbids
+  for ffmpeg, so it needs an explicit exception first.
+- **Added:** 2026-10-09

@@ -53,6 +53,11 @@ order, not a promise.
 | Save-clip shortcut | Fixed at ⌘/Ctrl+Shift+S | M | Reuse the key recorder of the mute shortcut |
 | Launch at login | Buffer already running when you play | S | Autostart plugin |
 | Video quality (Low / Medium / High / Custom) | Resolution, fps, bitrate | M | `EncoderConfig`; restarts the video capture (warn: buffer is lost) |
+| Post-roll (keep recording 0 / 5 / 10 / 15 s after the shortcut) | The clip includes how the play ended, not only what led to it | M | Save with a delay: wait N s, then extract. Today the clip ends at the key press |
+| Pause the buffer with a shortcut | Privacy: type a password without it being recorded | S | Stop/start the capture (also empties the buffer); the tray already has the entry |
+| Tray icon with state (recording / paused / error) | See if the buffer runs without opening the app | S | The tray exists |
+| Push-to-talk | Microphone only while a key is held | M | `tauri-plugin-global-shortcut` reports `Released`; drives `MicControls.muted` |
+| Show / hide the cursor in clips | Shooters without it, tutorials with it | S | ScreenCaptureKit `shows_cursor`; restarts the video capture (warn) |
 
 ### Wave 2 — comfort (F-3.6)
 
@@ -85,6 +90,57 @@ order, not a promise.
 | Automatic highlight detection | Clips without pressing the hotkey | L | Backlog item |
 | Share (clipboard, link) | One-step sharing | L | Needs a service |
 | Diagnostics: stats, logs folder, reset, export/import settings | Support | M | `EngineStats` already exposes counters |
+
+## Ideas pool (not scheduled)
+
+Ideas that are in no wave yet (added 2026-10-09). Promote one by moving it into
+a wave and a `milestone-3.md` checkbox. Anything that restarts the video
+capture needs the "buffer will be emptied" warning.
+
+### Capture and clip
+
+| Idea | Why | Effort | Notes |
+|---|---|---|---|
+| Exclude apps from the capture (chat, password manager, bank) | Privacy: they never show up in a clip | M | SCK `excluding_applications`; not the same as "capture a single window" |
+| Pause on screen lock, sleep or battery | Save battery, don't record what isn't a game | M | OS events; express the decision as a pure, tested function like `mic::plan` |
+| Mark a moment (extra shortcut leaving a marker) | "That was good": cut from there later | M | Markers in the clip or in the gallery |
+| Per-game profile (quality, clip length, microphone mode) | Each game with its own settings | L | Needs game detection (wave 3) |
+| Settings profiles (Competitive / Saver / Streaming) | Switch a group of settings at once | M | A profile is a partial `Settings`; validation doesn't change |
+
+### Audio
+
+| Idea | Why | Effort | Notes |
+|---|---|---|---|
+| Microphone automatic gain control (AGC) | An even voice without touching the slider | M | New stage in `MicProcessor`, deterministic tests |
+| Test the microphone (record 3 s and play it back) | Check it sounds right before playing | S | The meter exists; this adds listening |
+| Pick the output device to capture (Windows) | Playing through USB headphones, not the speakers | M | WASAPI loopback of the chosen device |
+| Choose or turn off the "clip saved" sound | Don't startle during a game | S | Joins wave 2 notifications |
+
+### Everyday use
+
+| Idea | Why | Effort | Notes |
+|---|---|---|---|
+| After saving: open folder / copy to clipboard / nothing | Paste the clip into chat in one step | S | Copy-file-to-clipboard differs per OS |
+| Start minimized to the tray | With launch at login, don't open the window | S | Goes with the autostart setting |
+| Configurable shortcuts for everything (open app, pause, mark) | One place for every shortcut | M | Generalizes the key recorder in `lib/hotkey.ts` |
+| Check for updates / beta channel | The app keeps itself current | M | Tauri updater; needs signing and hosting |
+| Accessibility (text size, reduced motion) | Comfortable use | S | CSS variables are centralized |
+
+### Library
+
+| Idea | Why | Effort | Notes |
+|---|---|---|---|
+| Sub-folders per game or date | Automatic order | S | `ClipService::unique_clip_path`; comes with the name template |
+| Favorites / protect from automatic deletion | The storage limit must not delete what matters | M | Depends on the storage limit (wave 2) |
+| Size cap for sharing (10 / 25 / 50 MB) | Clips that fit in a chat message | L | **Conflicts with a rule**: needs re-encoding, while `CLAUDE.md` says ffmpeg only stream-copies. The exception has to be decided first |
+
+### Performance and system
+
+| Idea | Why | Effort | Notes |
+|---|---|---|---|
+| Pick the GPU (laptops with two) | Encode on the dedicated or the integrated one | M | Media Foundation / VideoToolbox per OS |
+| Limit CPU/GPU use or fps under load | Don't get in the game's way | L | Needs measuring; tied to video quality |
+| Optional error reports | Support | M | Strictly opt-in; never send paths or captures |
 
 ## Known limits worth remembering
 

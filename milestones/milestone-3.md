@@ -40,6 +40,10 @@ app settings.
 - [ ] Save-clip shortcut
 - [ ] Launch at login
 - [ ] Video quality presets (warn that changing it empties the buffer)
+- [ ] Post-roll: keep recording 0 / 5 / 10 / 15 s after the save shortcut
+- [ ] Pause the buffer with a shortcut + tray icon with state
+- [ ] Push-to-talk for the microphone
+- [ ] Show / hide the cursor in clips (warn that it empties the buffer)
 
 ## F-3.6 — Settings, wave 2
 - [ ] Game audio on/off and volume
