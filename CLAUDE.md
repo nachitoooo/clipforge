@@ -52,6 +52,11 @@ hotkey saves the last N seconds as a clip.
 - **Encoding (per OS, behind the `Encoder` trait, always hardware):**
   - Windows: Media Foundation H.264/HEVC (NVENC/AMF/QSV resolved by MF)
   - macOS: VideoToolbox H.264/HEVC
+- **Audio (system/game sound, per OS):**
+  - macOS: ScreenCaptureKit audio (same stream as the video) → AudioToolbox AAC-LC
+  - Windows: WASAPI loopback → Media Foundation AAC encoder
+  - Packets are AAC and live in the ring buffer next to the video; the muxer
+    aligns them with an `elst` edit list (`clip/edit_list.rs`).
 - **Remux/trim:** `ffmpeg` sidecar binary (never for encoding — only stream copy).
 - **UI:** Tauri 2 + TypeScript (clips gallery, trim editor, settings, hotkeys).
 - **Global hotkeys:** `global-hotkey` crate.
@@ -62,16 +67,21 @@ hotkey saves the last N seconds as a clip.
 ```
 core/                  # clipforge-core crate
   src/
-    capture/           # FrameSource trait + test_pattern.rs, macos/, windows/
+    capture/           # FrameSource/AudioSource traits + test_pattern.rs, macos/, windows/
+    audio/             # AudioEncoder trait, ContinuityGuard, AAC encoders, WASAPI
     encode/            # Encoder trait + videotoolbox.rs, mediafoundation.rs
-    buffer/            # encoded-frame ring buffer (GOP-aligned eviction)
-    clip/              # extract last-N-seconds, remux to mp4, trim
+    buffer/            # encoded-frame ring buffer (GOP-aligned eviction) + AAC lane
+    clip/              # extract last-N-seconds, remux to mp4 (+audio track), trim
   tests/               # integration tests with TestPatternSource
 app/                   # Tauri 2 app (src-tauri/ + src/ TypeScript UI)
 milestones/            # feature tracking (see Milestone Tracking)
 docs/                  # design notes, per-OS API research
 scripts/               # dev helpers
 ```
+
+Audio rule: the mp4 muxer stores sample *durations*, not gaps, so audio must
+reach it gap-free — `ContinuityGuard` fills holes with silence before encoding.
+Audio is best effort: a failing audio path must never stop the video.
 
 Key design rule: **the ring buffer stores encoded frames** (not raw), so RAM
 stays bounded (~100MB for 2 min of 1080p60) and saving a clip is a remux, not

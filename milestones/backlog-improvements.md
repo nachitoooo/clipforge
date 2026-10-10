@@ -34,12 +34,13 @@ they come up (see CLAUDE.md → Improvement Backlog).
   (e.g., parsing game log files); ML/vision detection is a later iteration.
 - **Added:** 2026-07-07
 
-## Microphone + game audio tracks
-- **Related to:** F-1.4 (encoder), F-2.2 (remux)
-- **Why:** clips without game audio are near-useless for sharing; separate mic
-  track lets users mute themselves after the fact.
-- **Details:** audio capture per OS (WASAPI loopback / ScreenCaptureKit audio),
-  encode AAC, mux as separate tracks.
-- **Status (2026-10-09):** Ignacio asked about it again — clips are silent
-  today. Candidate to promote into a milestone before Biblioteca/Settings.
+## Microphone track
+- **Related to:** F-2.5 (system audio is done), F-2.2 (remux)
+- **Why:** a separate mic track lets users mute themselves after the fact.
+- **Details:** system/game audio shipped in F-2.5. The mic would be a second
+  AAC track: ScreenCaptureKit microphone output on macOS 15+ (needs the
+  Microphone permission) / WASAPI capture of the default input on Windows.
+  The pipeline already carries one audio stream end to end; a second one needs
+  a second encoder, a second buffer lane and a second `trak` in the muxer.
+- **Status (2026-10-09):** game audio implemented; mic not started.
 - **Added:** 2026-07-07

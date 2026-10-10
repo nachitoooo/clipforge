@@ -34,3 +34,18 @@ last N seconds in memory, and a global hotkey saves them as a clip file.
 - [ ] `MediaFoundationEncoder` implements `Encoder` (hardware H.264)
 - [ ] Ignored integration tests pass on a Windows machine / CI
 - [ ] Same clip pipeline (buffer/extract/hotkey) verified on Windows
+
+## F-2.5 — Audio tracks (system audio)
+> Added 2026-10-09 (promoted from the backlog: clips were silent). Microphone
+> as a separate track is **not** part of this feature — see the backlog.
+- [x] Audio pipeline types and traits (`AudioChunk`, `AudioPacket`, `AudioEncoder`, `AudioSource`) with a deterministic mock encoder and a synthetic tone source for tests
+- [x] `ContinuityGuard`: capture gaps are filled with silence, overlaps trimmed, huge jumps restart the timeline (the mp4 muxer stores durations, not gaps, so a hole would desync everything after it)
+- [x] AAC packets are buffered next to the video, bounded in time, with discontinuity handling; extraction returns the audio around the video span
+- [x] Clips carry an AAC track aligned to the video through an `elst` edit list (encoder delay, decoder warm-up for clips cut mid-stream, audio that starts after the video)
+  — verified 2026-10-09 by decoding with AVFoundation: a burst at a known instant lands within 4 ms, for full-stream, mid-stream and late-start audio
+- [x] macOS: system audio via ScreenCaptureKit (excluding ClipForge's own sounds) → AudioToolbox AAC-LC 128 kb/s, same epoch as the video
+  — measured 2026-10-09: 5 s of real capture → 239 AAC packets, saved clip has a 48 kHz stereo AAC track; video drop rate still 0.000%
+- [x] Audio never takes the video down: no AAC encoder → silent clips; a `WithAudio` source whose audio fails to start keeps recording video
+- [ ] Windows: WASAPI loopback (`audio/wasapi.rs`) + Media Foundation AAC encoder (`audio/aac_mediafoundation.rs`)
+  — written, cross-checked and linted for `x86_64-pc-windows-msvc`, **never run**. Needs F-2.4 (Windows video) wired in and `cargo test -p clipforge-core --test windows_audio -- --ignored` on a Windows machine; the MF encoder delay (`MF_AAC_PRIMING_FRAMES`) is an assumption to calibrate
+- [ ] Manual check on macOS with real game audio: play something, press the hotkey, listen to the clip (the automated real-capture test ran on a silent system, so audio *content* is covered by unit tests and a byte-count check, not by ear)

@@ -9,7 +9,29 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use crate::audio::AudioPacket;
 use crate::encode::EncodedPacket;
+
+/// Audio is kept slightly longer than `max_duration` so it always covers the
+/// video even when the oldest GOP overshoots the window.
+const AUDIO_WINDOW_MARGIN: Duration = Duration::from_secs(15);
+
+/// Audio is handed over from this much *before* the first video packet, so
+/// the muxer has packets to spare for the decoder's delay and warm-up...
+const AUDIO_PREROLL: Duration = Duration::from_millis(100);
+/// ...and this much past the last one, because a decoder emits the audio
+/// that long after it was encoded.
+const AUDIO_TAIL: Duration = Duration::from_millis(100);
+
+/// A clip's worth of packets cut from the buffer.
+#[derive(Debug, Clone, Default)]
+pub struct ClipSlice {
+    /// Starts at a keyframe.
+    pub video: Vec<EncodedPacket>,
+    /// AAC packets around the video's time span, with a little margin on both
+    /// sides (see `AUDIO_PREROLL`); empty without audio.
+    pub audio: Vec<AudioPacket>,
+}
 
 #[derive(Debug, Clone)]
 pub struct BufferConfig {
@@ -48,6 +70,10 @@ pub struct ReplayBuffer {
     packets: VecDeque<EncodedPacket>,
     /// Sum of packet payload sizes (the dominant memory cost).
     bytes: usize,
+    /// AAC packets for the same window; independent of GOP structure since
+    /// every AAC frame decodes on its own.
+    audio: VecDeque<AudioPacket>,
+    audio_bytes: usize,
     config: BufferConfig,
 }
 
@@ -56,6 +82,8 @@ impl ReplayBuffer {
         Self {
             packets: VecDeque::new(),
             bytes: 0,
+            audio: VecDeque::new(),
+            audio_bytes: 0,
             config,
         }
     }
@@ -151,6 +179,57 @@ impl ReplayBuffer {
         self.packets.iter().skip(start).cloned().collect()
     }
 
+    /// Like [`Self::extract_last`], plus the audio packets that fall inside
+    /// the extracted video's time span.
+    pub fn extract_last_with_audio(&self, duration: Duration) -> ClipSlice {
+        let video = self.extract_last(duration);
+        let audio = match (video.first(), video.last()) {
+            (Some(first), Some(last)) => self
+                .audio
+                .iter()
+                .filter(|p| p.pts + AUDIO_PREROLL >= first.pts && p.pts <= last.pts + AUDIO_TAIL)
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        };
+        ClipSlice { video, audio }
+    }
+
+    /// Add one AAC packet (monotonic pts expected). A backwards pts is a
+    /// discontinuity: the audio history is dropped and the packet starts a
+    /// new one.
+    pub fn push_audio(&mut self, packet: AudioPacket) {
+        if self.audio.back().is_some_and(|last| packet.pts <= last.pts) {
+            self.clear_audio();
+        }
+        self.audio_bytes += packet.data.len();
+        self.audio.push_back(packet);
+
+        let window = self.config.max_duration + AUDIO_WINDOW_MARGIN;
+        while let (Some(first), Some(last)) = (self.audio.front(), self.audio.back()) {
+            if last.pts - first.pts <= window {
+                break;
+            }
+            if let Some(dropped) = self.audio.pop_front() {
+                self.audio_bytes -= dropped.data.len();
+            }
+        }
+    }
+
+    pub fn clear_audio(&mut self) {
+        self.audio.clear();
+        self.audio_bytes = 0;
+    }
+
+    pub fn audio_packet_count(&self) -> usize {
+        self.audio.len()
+    }
+
+    /// Audio payload bytes currently held (small next to the video).
+    pub fn audio_memory_bytes(&self) -> usize {
+        self.audio_bytes
+    }
+
     /// pts span between the first and last packet.
     pub fn duration(&self) -> Duration {
         match (self.packets.front(), self.packets.back()) {
@@ -172,8 +251,129 @@ impl ReplayBuffer {
         self.packets.is_empty()
     }
 
+    /// Drop everything, video and audio.
     pub fn clear(&mut self) {
         self.packets.clear();
         self.bytes = 0;
+        self.clear_audio();
+    }
+}
+
+#[cfg(test)]
+mod audio_tests {
+    use super::*;
+
+    const AAC_MS: u64 = 21; // ≈ 1024 samples at 48 kHz
+
+    fn video(n: u64, gop: u64) -> EncodedPacket {
+        let pts = Duration::from_millis(n * 1000 / 60);
+        EncodedPacket {
+            data: vec![0; 100],
+            pts,
+            dts: pts,
+            is_keyframe: n.is_multiple_of(gop),
+        }
+    }
+
+    fn audio(k: u64) -> AudioPacket {
+        AudioPacket {
+            data: vec![0; 10],
+            pts: Duration::from_millis(k * AAC_MS),
+            duration: Duration::from_millis(AAC_MS),
+        }
+    }
+
+    fn filled(seconds: u64, gop: u64) -> ReplayBuffer {
+        let mut buffer = ReplayBuffer::new(BufferConfig::default());
+        for n in 0..seconds * 60 {
+            buffer.push(video(n, gop));
+        }
+        for k in 0..seconds * 1000 / AAC_MS {
+            buffer.push_audio(audio(k));
+        }
+        buffer
+    }
+
+    #[test]
+    fn extraction_pairs_audio_with_the_video_span() {
+        let buffer = filled(10, 60);
+        let slice = buffer.extract_last_with_audio(Duration::from_secs(3));
+        let (v_first, v_last) = (slice.video.first().unwrap(), slice.video.last().unwrap());
+        assert!(v_first.is_keyframe);
+        assert!(!slice.audio.is_empty());
+        assert!(slice.audio.first().unwrap().pts + AUDIO_PREROLL >= v_first.pts);
+        assert!(slice.audio.last().unwrap().pts <= v_last.pts + AUDIO_TAIL);
+        // Roughly 3-4 s of audio (3 s requested, up to one 1 s GOP extra).
+        let total: Duration = slice.audio.iter().map(|p| p.duration).sum();
+        assert!(
+            total >= Duration::from_millis(2900) && total <= Duration::from_millis(4300),
+            "{total:?}"
+        );
+    }
+
+    #[test]
+    fn extraction_without_audio_matches_video_only() {
+        let mut buffer = ReplayBuffer::new(BufferConfig::default());
+        for n in 0..300 {
+            buffer.push(video(n, 60));
+        }
+        let slice = buffer.extract_last_with_audio(Duration::from_secs(2));
+        assert_eq!(
+            slice.video.len(),
+            buffer.extract_last(Duration::from_secs(2)).len()
+        );
+        assert!(slice.audio.is_empty());
+    }
+
+    #[test]
+    fn empty_buffer_yields_an_empty_slice() {
+        let mut buffer = ReplayBuffer::new(BufferConfig::default());
+        buffer.push_audio(audio(0));
+        let slice = buffer.extract_last_with_audio(Duration::from_secs(5));
+        assert!(slice.video.is_empty() && slice.audio.is_empty());
+    }
+
+    #[test]
+    fn audio_window_is_bounded() {
+        let mut buffer = ReplayBuffer::new(BufferConfig {
+            max_duration: Duration::from_secs(10),
+            ..Default::default()
+        });
+        // 120 s of audio into a 10 s (+15 s margin) window.
+        for k in 0..120_000 / AAC_MS {
+            buffer.push_audio(audio(k));
+        }
+        let span = buffer.audio.back().unwrap().pts - buffer.audio.front().unwrap().pts;
+        assert!(span <= Duration::from_secs(25), "span {span:?}");
+        assert!(span >= Duration::from_secs(24), "span {span:?}");
+        assert_eq!(
+            buffer.audio_memory_bytes(),
+            buffer.audio_packet_count() * 10
+        );
+    }
+
+    #[test]
+    fn backwards_audio_pts_clears_only_the_audio() {
+        let mut buffer = filled(5, 60);
+        let video_before = buffer.packet_count();
+        buffer.push_audio(audio(0)); // pts goes back to 0
+        assert_eq!(buffer.audio_packet_count(), 1);
+        assert_eq!(buffer.packet_count(), video_before);
+    }
+
+    #[test]
+    fn video_discontinuity_clears_audio_too() {
+        let mut buffer = filled(5, 60);
+        buffer.push(video(0, 60)); // video pts jumps back: new epoch
+        assert_eq!(buffer.audio_packet_count(), 0);
+        assert_eq!(buffer.audio_memory_bytes(), 0);
+    }
+
+    #[test]
+    fn clear_empties_both_streams() {
+        let mut buffer = filled(5, 60);
+        buffer.clear();
+        assert!(buffer.is_empty());
+        assert_eq!(buffer.audio_packet_count(), 0);
     }
 }
