@@ -1,9 +1,16 @@
 mod dispatch;
 mod library;
+mod mic;
 mod recorder;
 mod settings;
 
-use dispatch::{dispatch, Actions, Command};
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use dispatch::{dispatch, Actions, Command, MuteOutcome};
+use mic::{MicDevice, MicStatus};
 use recorder::{BufferStatus, Recorder, DEFAULT_CLIP_SECONDS};
 use settings::{Settings, SettingsStore};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -43,6 +50,20 @@ impl AppActions {
             .emit("buffer-changed", self.recorder().status())
             .ok();
     }
+
+    fn settings(&self) -> tauri::State<'_, Arc<SettingsStore>> {
+        self.app.state::<Arc<SettingsStore>>()
+    }
+}
+
+/// Apply the microphone settings off the calling thread (opening a device can
+/// block on the permission prompt) and tell the UI how it went.
+fn apply_microphone_in_background(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let status = app.state::<Recorder>().apply_microphone();
+        app.emit("mic-status", &status).ok();
+    });
 }
 
 impl Actions for AppActions {
@@ -55,12 +76,20 @@ impl Actions for AppActions {
         // Remember a failure so a UI that loads later can still explain it.
         self.recorder().record_start_result(&result);
         self.emit_buffer_status();
+        if result.is_ok() {
+            // The microphone shares the video's clock, so it can only join
+            // once the capture is running.
+            apply_microphone_in_background(&self.app);
+        }
         result
     }
 
     fn stop_buffer(&self) {
         self.recorder().stop();
         self.emit_buffer_status();
+        self.app
+            .emit("mic-status", self.recorder().mic_status())
+            .ok();
     }
 
     fn save_clip(&self) -> Result<String, String> {
@@ -85,6 +114,25 @@ impl Actions for AppActions {
         {
             eprintln!("open clips folder: {e}");
         }
+    }
+
+    fn toggle_mic_mute(&self) -> Result<MuteOutcome, String> {
+        let store = self.settings();
+        let mut next = store.get();
+        if !next.microphone.enabled {
+            return Ok(MuteOutcome::MicOff);
+        }
+        next.microphone.muted = !next.microphone.muted;
+        let saved = store.replace(next.validated(&reserved_shortcuts())?)?;
+        self.app.emit("settings-changed", &saved).ok();
+        // Muting only flips an atomic: apply it right here, no device work.
+        let status = self.recorder().apply_microphone();
+        self.app.emit("mic-status", &status).ok();
+        Ok(if saved.microphone.muted {
+            MuteOutcome::Muted
+        } else {
+            MuteOutcome::Unmuted
+        })
     }
 
     fn quit(&self) {
@@ -163,20 +211,75 @@ fn reveal_clip(
 }
 
 #[tauri::command]
-fn get_settings(store: tauri::State<'_, SettingsStore>) -> Settings {
+fn get_settings(store: tauri::State<'_, Arc<SettingsStore>>) -> Settings {
     store.get()
+}
+
+/// Move the mute hotkey. The new one is registered first, so if the OS or
+/// another app refuses it nothing has changed yet.
+fn swap_mute_shortcut(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
+    let shortcuts = app.global_shortcut();
+    let new_shortcut = Shortcut::from_str(new).map_err(|_| format!("atajo no válido: «{new}»"))?;
+    shortcuts.register(new_shortcut).map_err(|e| {
+        format!("no se pudo registrar el atajo «{new}» (¿lo usa otra aplicación?): {e}")
+    })?;
+    if let Ok(old_shortcut) = Shortcut::from_str(old) {
+        shortcuts.unregister(old_shortcut).ok();
+    }
+    Ok(())
 }
 
 #[tauri::command]
 fn update_settings(
     app: AppHandle,
-    store: tauri::State<'_, SettingsStore>,
+    store: tauri::State<'_, Arc<SettingsStore>>,
     settings: Settings,
 ) -> Result<Settings, String> {
     let validated = settings.validated(&reserved_shortcuts())?;
-    let saved = store.replace(validated)?;
+    let old_shortcut = store.get().microphone.mute_shortcut;
+    let new_shortcut = validated.microphone.mute_shortcut.clone();
+    if old_shortcut != new_shortcut {
+        swap_mute_shortcut(&app, &old_shortcut, &new_shortcut)?;
+    }
+    let saved = match store.replace(validated) {
+        Ok(saved) => saved,
+        Err(e) => {
+            if old_shortcut != new_shortcut {
+                swap_mute_shortcut(&app, &new_shortcut, &old_shortcut).ok();
+            }
+            return Err(e);
+        }
+    };
     app.emit("settings-changed", &saved).ok();
+    app.state::<Recorder>().apply_live_controls();
+    apply_microphone_in_background(&app);
     Ok(saved)
+}
+
+#[tauri::command]
+async fn list_microphones(app: AppHandle) -> Result<Vec<MicDevice>, String> {
+    // Enumerating devices talks to the OS audio service: keep it off the UI thread.
+    tauri::async_runtime::spawn_blocking(move || app.state::<Recorder>().list_microphones())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn microphone_status(recorder: tauri::State<'_, Recorder>) -> MicStatus {
+    recorder.mic_status()
+}
+
+#[tauri::command]
+fn retry_microphone(app: AppHandle) {
+    apply_microphone_in_background(&app);
+}
+
+/// Whether the Settings screen is open: the level meter only streams then.
+struct MeterActive(AtomicBool);
+
+#[tauri::command]
+fn set_meter_active(active: bool, meter: tauri::State<'_, MeterActive>) {
+    meter.0.store(active, Ordering::Relaxed);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -187,9 +290,20 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    if event.state() == ShortcutState::Pressed && *shortcut == save_clip_shortcut()
-                    {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    if *shortcut == save_clip_shortcut() {
                         run_command(app.app_handle(), Command::SaveClip);
+                        return;
+                    }
+                    let mute = app
+                        .state::<Arc<SettingsStore>>()
+                        .get()
+                        .microphone
+                        .mute_shortcut;
+                    if Shortcut::from_str(&mute).is_ok_and(|m| m == *shortcut) {
+                        run_command(app.app_handle(), Command::ToggleMicMute);
                     }
                 })
                 .build(),
@@ -204,7 +318,11 @@ pub fn run() {
             delete_clip,
             reveal_clip,
             get_settings,
-            update_settings
+            update_settings,
+            list_microphones,
+            microphone_status,
+            retry_microphone,
+            set_meter_active
         ])
         .setup(|app| {
             // Clips folder: ~/Movies/ClipForge (or the OS video dir).
@@ -213,10 +331,12 @@ pub fn run() {
                 .video_dir()
                 .unwrap_or_else(|_| std::env::temp_dir())
                 .join("ClipForge");
-            app.manage(SettingsStore::load(
+            let settings = Arc::new(SettingsStore::load(
                 app.path().app_config_dir()?.join("settings.json"),
             ));
-            app.manage(Recorder::new(clips_dir));
+            app.manage(Arc::clone(&settings));
+            app.manage(Recorder::new(clips_dir, Arc::clone(&settings)));
+            app.manage(MeterActive(AtomicBool::new(false)));
 
             // Tray menu (menu-bar icon on macOS).
             let toggle =
@@ -224,12 +344,15 @@ pub fn run() {
             let save = MenuItemBuilder::with_id("save_clip", "Guardar clip (últimos 30 s)")
                 .accelerator("CmdOrCtrl+Shift+S")
                 .build(app)?;
+            let mute = MenuItemBuilder::with_id("toggle_mic_mute", "Silenciar/activar micrófono")
+                .build(app)?;
             let open =
                 MenuItemBuilder::with_id("open_folder", "Abrir carpeta de clips").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Salir de ClipForge").build(app)?;
             let menu = MenuBuilder::new(app)
                 .item(&toggle)
                 .item(&save)
+                .item(&mute)
                 .separator()
                 .item(&open)
                 .separator()
@@ -246,8 +369,42 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Global hotkey.
+            // Global hotkeys. The save shortcut is essential; the mute one is
+            // a convenience, so failing to claim it must not stop the app.
             app.global_shortcut().register(save_clip_shortcut())?;
+            match Shortcut::from_str(&settings.get().microphone.mute_shortcut) {
+                Ok(mute) => {
+                    if let Err(e) = app.global_shortcut().register(mute) {
+                        eprintln!("clipforge: mute shortcut unavailable: {e}");
+                    }
+                }
+                Err(e) => eprintln!("clipforge: mute shortcut invalid: {e}"),
+            }
+
+            // Microphone watcher: streams the input level to the Settings
+            // meter while it is open, and tells the UI whenever the
+            // microphone's health changes (device unplugged, no signal...).
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut last: Option<MicStatus> = None;
+                let mut tick = 0u32;
+                loop {
+                    std::thread::sleep(Duration::from_millis(50));
+                    let recorder = handle.state::<Recorder>();
+                    let peak = recorder.take_mic_peak();
+                    if handle.state::<MeterActive>().0.load(Ordering::Relaxed) {
+                        handle.emit("mic-level", peak).ok();
+                    }
+                    tick += 1;
+                    if tick.is_multiple_of(20) {
+                        let status = recorder.mic_status();
+                        if last.as_ref() != Some(&status) {
+                            handle.emit("mic-status", &status).ok();
+                            last = Some(status);
+                        }
+                    }
+                }
+            });
 
             // Background mode: start the replay buffer right away; a denied
             // screen-recording permission surfaces as a notification, not a
