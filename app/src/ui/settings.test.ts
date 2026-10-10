@@ -49,11 +49,16 @@ const settle = async () => {
 type SettingsModule = typeof import("./settings");
 let createSettings: SettingsModule["createSettings"];
 
+/** Views mounted by the current test: hidden afterwards so a recorder left
+ * listening can't answer the next test's key presses. */
+const mounted: { onHide(): void }[] = [];
+
 async function mount(initial: Settings = defaultSettings(), status: MicStatus = healthy) {
   document.body.innerHTML = '<div id="toasts"></div><section id="root"></section>';
   api.getSettings.mockResolvedValue(initial);
   api.microphoneStatus.mockResolvedValue(status);
   const view = createSettings(document.getElementById("root")!);
+  mounted.push(view);
   await settle();
   return view;
 }
@@ -65,6 +70,7 @@ const enabledSwitch = () => q<HTMLInputElement>('input[aria-label="Grabar el mic
 const muteSwitch = () => q<HTMLInputElement>('input[aria-label="Silenciar el micrófono"]');
 const gainSlider = () => q<HTMLInputElement>('input[type="range"]');
 const deviceSelect = () => q<HTMLSelectElement>("select");
+const micBody = () => q<HTMLElement>('[aria-labelledby="mic-title"] .panel-body');
 const banner = () => q<HTMLElement>(".banner-slot");
 const lastSaved = () =>
   api.updateSettings.mock.calls[api.updateSettings.mock.calls.length - 1][0] as Settings;
@@ -89,6 +95,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  for (const view of mounted.splice(0)) view.onHide();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -102,7 +109,7 @@ describe("the microphone section", () => {
   it("starts switched off with the options hidden", async () => {
     await mount();
     expect(enabledSwitch().checked).toBe(false);
-    expect(q<HTMLElement>(".panel-body").hidden).toBe(true);
+    expect(micBody().hidden).toBe(true);
     expect(q(".chip").textContent).toBe("Desactivado");
   });
 
@@ -114,7 +121,7 @@ describe("the microphone section", () => {
       muted: true,
     });
     expect(enabledSwitch().checked).toBe(true);
-    expect(q<HTMLElement>(".panel-body").hidden).toBe(false);
+    expect(micBody().hidden).toBe(false);
     expect(gainSlider().value).toBe("150");
     expect(q(".range-value").textContent).toBe("150 % · +3,5 dB");
     expect(muteSwitch().checked).toBe(true);
@@ -130,7 +137,7 @@ describe("the microphone section", () => {
     enabledSwitch().dispatchEvent(new Event("change"));
     await settle();
     expect(lastSaved().microphone.enabled).toBe(true);
-    expect(q<HTMLElement>(".panel-body").hidden).toBe(false);
+    expect(micBody().hidden).toBe(false);
   });
 
   it("lists the microphones when the screen opens and saves the choice", async () => {
@@ -275,7 +282,8 @@ describe("health messages", () => {
 describe("the mute shortcut", () => {
   const keydown = (init: KeyboardEventInit & { code: string }) =>
     window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
-  const shortcutButton = () => q<HTMLButtonElement>(".kbd-btn");
+  const shortcutButton = () => q<HTMLButtonElement>('[data-shortcut="mute-mic"]');
+  const note = () => q('[data-shortcut-note="mute-mic"]');
 
   it("shows the current shortcut in the platform's notation", async () => {
     await mount(micSettings({ enabled: true }));
@@ -302,7 +310,7 @@ describe("the mute shortcut", () => {
     keydown({ code: "KeyS", key: "s", metaKey: true, shiftKey: true });
     await settle();
     expect(api.updateSettings).not.toHaveBeenCalled();
-    expect(q(".shortcut-note").textContent).toContain("Guardar clip");
+    expect(note().textContent).toContain("Guardar clip");
     expect(shortcutButton().textContent).toBe("Presioná la combinación…"); // still recording
   });
 
@@ -310,7 +318,7 @@ describe("the mute shortcut", () => {
     await mount(micSettings({ enabled: true }));
     shortcutButton().click();
     keydown({ code: "KeyK", key: "k" }); // no modifier
-    expect(q(".shortcut-note").textContent).toContain("Combiná");
+    expect(note().textContent).toContain("Combiná");
     expect(shortcutButton().classList.contains("recording")).toBe(true);
   });
 
@@ -331,6 +339,139 @@ describe("the mute shortcut", () => {
     keydown({ code: "KeyK", key: "k", metaKey: true });
     await settle();
     expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("the save-clip shortcut", () => {
+  const keydown = (init: KeyboardEventInit & { code: string }) =>
+    window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+  const saveButton = () => q<HTMLButtonElement>('[data-shortcut="save-clip"]');
+  const muteButton = () => q<HTMLButtonElement>('[data-shortcut="mute-mic"]');
+  const note = () => q('[data-shortcut-note="save-clip"]');
+  const resetButton = () =>
+    qa<HTMLButtonElement>(".panel .btn").find((b) => b.textContent === "Restablecer")!;
+  const withSave = (saveClip: string, micro: Partial<Settings["microphone"]> = {}): Settings => {
+    const s = micSettings(micro);
+    return { ...s, shortcuts: { ...s.shortcuts, saveClip } };
+  };
+
+  it("is there even with the microphone off, in the platform's notation", async () => {
+    await mount();
+    expect(enabledSwitch().checked).toBe(false);
+    expect(saveButton().textContent).toBe("⇧⌘S");
+    expect(q('[aria-labelledby="shortcuts-title"]').textContent).toContain("Guardar clip");
+  });
+
+  it("records a new combination and saves it without touching the microphone", async () => {
+    await mount(micSettings({ enabled: true, gainPercent: 130 }));
+    saveButton().click();
+    expect(saveButton().textContent).toBe("Presioná la combinación…");
+
+    keydown({ code: "F9", key: "F9", altKey: true });
+    await settle();
+    expect(lastSaved().shortcuts.saveClip).toBe("Alt+F9");
+    expect(lastSaved().microphone.gainPercent).toBe(130);
+    expect(lastSaved().microphone.muteShortcut).toBe("CommandOrControl+Shift+M");
+    expect(saveButton().textContent).toBe("⌥F9");
+  });
+
+  it("refuses the keys the microphone's mute shortcut uses", async () => {
+    await mount();
+    saveButton().click();
+    keydown({ code: "KeyM", key: "m", metaKey: true, shiftKey: true });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(note().textContent).toContain("Silenciar el micrófono");
+    expect(saveButton().textContent).toBe("Presioná la combinación…"); // still recording
+  });
+
+  it("the mute shortcut refuses whatever the save shortcut was changed to", async () => {
+    await mount(withSave("Alt+F9", { enabled: true }));
+    muteButton().click();
+    keydown({ code: "F9", key: "F9", altKey: true });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(q('[data-shortcut-note="mute-mic"]').textContent).toContain("Guardar clip");
+    // ...and the old save keys are free for the mute shortcut now.
+    keydown({ code: "KeyS", key: "s", metaKey: true, shiftKey: true });
+    await settle();
+    expect(lastSaved().microphone.muteShortcut).toBe("CommandOrControl+Shift+S");
+  });
+
+  it("explains an unusable combination and keeps listening", async () => {
+    await mount();
+    saveButton().click();
+    keydown({ code: "KeyK", key: "k" });
+    expect(note().textContent).toContain("Combiná");
+    expect(saveButton().classList.contains("recording")).toBe(true);
+  });
+
+  it("Escape cancels without changing anything", async () => {
+    await mount();
+    saveButton().click();
+    keydown({ code: "Escape", key: "Escape" });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(saveButton().textContent).toBe("⇧⌘S");
+    expect(note().textContent).toBe("");
+  });
+
+  it("recording one shortcut stops recording the other", async () => {
+    await mount(micSettings({ enabled: true }));
+    muteButton().click();
+    saveButton().click();
+    expect(muteButton().textContent).toBe("⇧⌘M");
+    expect(saveButton().textContent).toBe("Presioná la combinación…");
+
+    keydown({ code: "KeyK", key: "k", metaKey: true, shiftKey: true });
+    await settle();
+    expect(lastSaved().shortcuts.saveClip).toBe("CommandOrControl+Shift+K");
+    expect(lastSaved().microphone.muteShortcut).toBe("CommandOrControl+Shift+M");
+  });
+
+  it("offers to go back to the usual shortcut only when it was changed", async () => {
+    await mount();
+    expect(resetButton().hidden).toBe(true);
+
+    saveButton().click();
+    keydown({ code: "F9", key: "F9", altKey: true });
+    await settle();
+    expect(resetButton().hidden).toBe(false);
+
+    resetButton().click();
+    await settle();
+    expect(lastSaved().shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
+    expect(saveButton().textContent).toBe("⇧⌘S");
+    expect(resetButton().hidden).toBe(true);
+  });
+
+  it("a shortcut the system refuses is reverted and the reason is shown", async () => {
+    await mount();
+    api.updateSettings.mockRejectedValueOnce("no se pudo registrar el atajo «Alt+F9»");
+    saveButton().click();
+    keydown({ code: "F9", key: "F9", altKey: true });
+    await settle();
+    expect(q("#toasts").textContent).toContain("no se pudo registrar");
+    expect(saveButton().textContent).toBe("⇧⌘S");
+    expect(resetButton().hidden).toBe(true);
+  });
+
+  it("follows a change made elsewhere", async () => {
+    await mount();
+    listeners.settings.forEach((cb) => cb(withSave("Alt+F9")));
+    await settle();
+    expect(saveButton().textContent).toBe("⌥F9");
+  });
+
+  it("leaving the screen stops recording", async () => {
+    const view = await mount();
+    view.onShow();
+    saveButton().click();
+    view.onHide();
+    keydown({ code: "KeyK", key: "k", metaKey: true });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(saveButton().textContent).toBe("⇧⌘S");
   });
 });
 

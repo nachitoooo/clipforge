@@ -47,7 +47,8 @@ app settings.
 - [ ] Buffer length (60 / 120 / 180 s)
 - [ ] Default clip length (15 / 30 / 60 / 120 s)
 - [ ] Clips folder
-- [ ] Save-clip shortcut
+- [x] Save-clip shortcut, configurable in Settings → Atajos (record a key combination, "Restablecer" goes back to the default); applied at once, refused with a reason if the OS or another app owns it, kept apart from the mute shortcut; the tray hint and the gallery button show the current one
+  — Rust tests (validation, repair of a hand-edited file, all-or-nothing registration with a fake registry) and simulated-DOM tests; pressing a custom shortcut in the real app is still to be tried by hand
 - [ ] Launch at login
 - [ ] Video quality presets (warn that changing it empties the buffer)
 - [ ] Post-roll: keep recording 0 / 5 / 10 / 15 s after the save shortcut

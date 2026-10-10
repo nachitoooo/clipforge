@@ -312,12 +312,8 @@ mod tests {
 
     fn recorder_with(settings: Settings) -> Recorder {
         let dir = std::env::temp_dir().join(format!(
-            "clipforge-recorder-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            "clipforge-recorder-test-{}",
+            crate::testutil::unique()
         ));
         let store = Arc::new(SettingsStore::load(dir.join("settings.json")));
         store.replace(settings).unwrap();

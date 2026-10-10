@@ -3,7 +3,7 @@ import {
   captureAccelerator,
   displayAccelerator,
   normalizeAccelerator,
-  reservedOwner,
+  ownerOf,
   sameAccelerator,
   type KeyEventLike,
 } from "./hotkey";
@@ -125,13 +125,24 @@ describe("displayAccelerator", () => {
   });
 });
 
-describe("reservedOwner", () => {
+describe("ownerOf", () => {
+  const taken = [
+    { accelerator: "CommandOrControl+Shift+S", owner: "Guardar clip" },
+    { accelerator: "Alt+F9", owner: "Silenciar el micrófono" },
+  ];
+
   it("names the feature that already owns a shortcut, however it is spelled", () => {
-    expect(reservedOwner("CommandOrControl+Shift+S")).toBe("Guardar clip");
-    expect(reservedOwner("Shift+CmdOrCtrl+s")).toBe("Guardar clip");
+    expect(ownerOf("CommandOrControl+Shift+S", taken)).toBe("Guardar clip");
+    expect(ownerOf("Shift+CmdOrCtrl+s", taken)).toBe("Guardar clip");
+    expect(ownerOf("Option+F9", taken)).toBe("Silenciar el micrófono");
   });
 
   it("returns null for free shortcuts", () => {
-    expect(reservedOwner("CommandOrControl+Shift+M")).toBeNull();
+    expect(ownerOf("CommandOrControl+Shift+M", taken)).toBeNull();
+    expect(ownerOf("Control+Shift+S", taken)).toBeNull();
+  });
+
+  it("has nothing to conflict with when nothing is taken", () => {
+    expect(ownerOf("CommandOrControl+Shift+S", [])).toBeNull();
   });
 });

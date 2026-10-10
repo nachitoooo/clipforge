@@ -12,8 +12,14 @@ export interface MicrophoneSettings {
   muteShortcut: string;
 }
 
+export interface ShortcutSettings {
+  /** Global accelerator that saves a clip, e.g. `CommandOrControl+Shift+S`. */
+  saveClip: string;
+}
+
 export interface Settings {
   version: number;
+  shortcuts: ShortcutSettings;
   microphone: MicrophoneSettings;
 }
 
@@ -35,17 +41,20 @@ export interface MicDevice {
 export const GAIN_MIN_PERCENT = 0;
 export const GAIN_MAX_PERCENT = 200;
 export const DEFAULT_GAIN_PERCENT = 100;
+export const DEFAULT_SAVE_SHORTCUT = "CommandOrControl+Shift+S";
+export const DEFAULT_MUTE_SHORTCUT = "CommandOrControl+Shift+M";
 
 export function defaultSettings(): Settings {
   return {
     version: 1,
+    shortcuts: { saveClip: DEFAULT_SAVE_SHORTCUT },
     microphone: {
       enabled: false,
       deviceId: null,
       mode: "mixed",
       gainPercent: DEFAULT_GAIN_PERCENT,
       muted: false,
-      muteShortcut: "CommandOrControl+Shift+M",
+      muteShortcut: DEFAULT_MUTE_SHORTCUT,
     },
   };
 }
@@ -79,6 +88,11 @@ export function withMicrophone(
   patch: Partial<MicrophoneSettings>,
 ): Settings {
   return { ...settings, microphone: { ...settings.microphone, ...patch } };
+}
+
+/** A copy of `settings` with the shortcuts section patched. */
+export function withShortcuts(settings: Settings, patch: Partial<ShortcutSettings>): Settings {
+  return { ...settings, shortcuts: { ...settings.shortcuts, ...patch } };
 }
 
 export const MIC_MODE_LABEL: Record<MicMode, string> = {

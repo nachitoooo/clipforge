@@ -1,12 +1,9 @@
 import * as api from "../api";
-import {
-  captureAccelerator,
-  displayAccelerator,
-  reservedOwner,
-} from "../lib/hotkey";
+import { ownerOf } from "../lib/hotkey";
 import { PeakMeter, peakToPercent } from "../lib/level";
 import {
   GAIN_MAX_PERCENT,
+  DEFAULT_SAVE_SHORTCUT,
   GAIN_MIN_PERCENT,
   MIC_MODE_LABEL,
   MIC_MODE_NOTE,
@@ -15,14 +12,17 @@ import {
   formatGain,
   micStateSummary,
   withMicrophone,
+  withShortcuts,
   type MicDevice,
   type MicMode,
   type MicStatus,
   type MicrophoneSettings,
   type Settings,
+  type ShortcutSettings,
 } from "../lib/settings";
 import { h, svg } from "./dom";
 import { icons } from "./icons";
+import { createShortcutRecorder } from "./shortcut";
 import { switchControl } from "./switch";
 import { toast } from "./toast";
 
@@ -56,8 +56,6 @@ export function createSettings(root: HTMLElement): SettingsView {
   let status: MicStatus | null = null;
   let devices: MicDevice[] = [];
   let visible = false;
-  let recordingShortcut = false;
-  let shortcutHint = "";
   let saveTimer: number | undefined;
   let queue: Promise<void> = Promise.resolve();
 
@@ -111,12 +109,70 @@ export function createSettings(root: HTMLElement): SettingsView {
   const muteSwitch = switchControl("Silenciar el micrófono", (checked) =>
     change({ muted: checked }),
   );
-  const shortcutButton = h("button", {
-    class: "btn kbd-btn",
+  const muteRecorder = createShortcutRecorder({
+    id: "mute-mic",
+    isMac,
     title: "Cambiar el atajo para silenciar",
-    onclick: () => (recordingShortcut ? stopRecording() : startRecording()),
+    current: () => settings.microphone.muteShortcut,
+    conflict: (accelerator) =>
+      ownerOf(accelerator, [{ accelerator: settings.shortcuts.saveClip, owner: "Guardar clip" }]),
+    onChange: (muteShortcut) => change({ muteShortcut }),
   });
-  const shortcutNote = h("div", { class: "row-hint shortcut-note" });
+
+  // ---- global shortcuts panel -------------------------------------------
+
+  const saveRecorder = createShortcutRecorder({
+    id: "save-clip",
+    isMac,
+    title: "Cambiar el atajo para guardar un clip",
+    current: () => settings.shortcuts.saveClip,
+    conflict: (accelerator) =>
+      ownerOf(accelerator, [
+        { accelerator: settings.microphone.muteShortcut, owner: "Silenciar el micrófono" },
+      ]),
+    onChange: (saveClip) => changeShortcuts({ saveClip }),
+  });
+  const resetSaveShortcut = h(
+    "button",
+    {
+      class: "btn",
+      title: "Volver al atajo de siempre",
+      onclick: () => {
+        saveRecorder.stop();
+        changeShortcuts({ saveClip: DEFAULT_SAVE_SHORTCUT });
+      },
+    },
+    "Restablecer",
+  );
+  const shortcutsPanel = h(
+    "section",
+    { class: "panel", "aria-labelledby": "shortcuts-title" },
+    h(
+      "div",
+      { class: "panel-head" },
+      h(
+        "div",
+        { class: "panel-title" },
+        svg(icons.keyboard),
+        h("h2", { id: "shortcuts-title" }, "Atajos"),
+      ),
+    ),
+    h(
+      "p",
+      { class: "panel-intro muted" },
+      "Funcionan desde cualquier aplicación o juego, aunque ClipForge esté en segundo plano.",
+    ),
+    h(
+      "div",
+      { class: "panel-body" },
+      row(
+        "Guardar clip",
+        "Guarda los últimos 30 segundos del buffer",
+        h("div", { class: "mute-controls" }, saveRecorder.button, resetSaveShortcut),
+      ),
+      saveRecorder.note,
+    ),
+  );
 
   const optionsBody = h(
     "div",
@@ -149,9 +205,9 @@ export function createSettings(root: HTMLElement): SettingsView {
     row(
       "Silenciar",
       "Corta tu voz sin apagar el micrófono",
-      h("div", { class: "mute-controls" }, muteSwitch.el, shortcutButton),
+      h("div", { class: "mute-controls" }, muteSwitch.el, muteRecorder.button),
     ),
-    shortcutNote,
+    muteRecorder.note,
   );
 
   const panel = h(
@@ -184,7 +240,7 @@ export function createSettings(root: HTMLElement): SettingsView {
       { class: "view-header" },
       h("div", {}, h("h1", {}, "Configuración"), h("p", { class: "muted" }, "Cambios con efecto inmediato")),
     ),
-    h("div", { class: "view-body" }, h("div", { class: "settings" }, panel)),
+    h("div", { class: "view-body" }, h("div", { class: "settings" }, shortcutsPanel, panel)),
   );
 
   // ---- rendering from state --------------------------------------------
@@ -257,11 +313,9 @@ export function createSettings(root: HTMLElement): SettingsView {
     if (document.activeElement !== gainSlider) gainSlider.value = String(mic.gainPercent);
     gainValue.textContent = formatGain(mic.gainPercent);
     muteSwitch.input.checked = mic.muted;
-    shortcutButton.textContent = recordingShortcut
-      ? "Presioná la combinación…"
-      : displayAccelerator(mic.muteShortcut, isMac);
-    shortcutButton.classList.toggle("recording", recordingShortcut);
-    shortcutNote.textContent = shortcutHint;
+    muteRecorder.render();
+    saveRecorder.render();
+    resetSaveShortcut.hidden = settings.shortcuts.saveClip === DEFAULT_SAVE_SHORTCUT;
     meterHint.textContent = !mic.enabled
       ? ""
       : mic.muted
@@ -273,7 +327,15 @@ export function createSettings(root: HTMLElement): SettingsView {
   // ---- saving ----------------------------------------------------------
 
   function change(patch: Partial<MicrophoneSettings>, debounce = false): void {
-    settings = withMicrophone(settings, patch);
+    update(withMicrophone(settings, patch), debounce);
+  }
+
+  function changeShortcuts(patch: Partial<ShortcutSettings>): void {
+    update(withShortcuts(settings, patch), false);
+  }
+
+  function update(next: Settings, debounce: boolean): void {
+    settings = next;
     renderValues();
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
@@ -296,51 +358,6 @@ export function createSettings(root: HTMLElement): SettingsView {
       settings = lastSaved;
       renderValues();
     }
-  }
-
-  // ---- shortcut recording ------------------------------------------------
-
-  function onKeyDown(e: KeyboardEvent): void {
-    e.preventDefault();
-    e.stopPropagation();
-    const result = captureAccelerator(e, isMac);
-    switch (result.kind) {
-      case "waiting":
-        return;
-      case "cancel":
-        stopRecording();
-        return;
-      case "invalid":
-        shortcutHint = result.reason;
-        renderValues();
-        return;
-      case "accelerator": {
-        const owner = reservedOwner(result.accelerator);
-        if (owner) {
-          shortcutHint = `Ese atajo ya lo usa «${owner}»`;
-          renderValues();
-          return;
-        }
-        stopRecording();
-        change({ muteShortcut: result.accelerator });
-      }
-    }
-  }
-
-  function startRecording(): void {
-    recordingShortcut = true;
-    shortcutHint = "Presioná la combinación nueva (Esc para cancelar)";
-    window.addEventListener("keydown", onKeyDown, true);
-    shortcutButton.addEventListener("blur", stopRecording, { once: true });
-    renderValues();
-  }
-
-  function stopRecording(): void {
-    if (!recordingShortcut) return;
-    recordingShortcut = false;
-    shortcutHint = "";
-    window.removeEventListener("keydown", onKeyDown, true);
-    renderValues();
   }
 
   // ---- live level meter --------------------------------------------------
@@ -414,7 +431,8 @@ export function createSettings(root: HTMLElement): SettingsView {
     },
     onHide() {
       visible = false;
-      stopRecording();
+      muteRecorder.stop();
+      saveRecorder.stop();
       void api.setMeterActive(false);
       meter.reset();
     },

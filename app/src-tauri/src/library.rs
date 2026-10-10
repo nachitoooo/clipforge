@@ -143,13 +143,9 @@ mod tests {
 
     impl TempDir {
         fn new(label: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
             let dir = std::env::temp_dir().join(format!(
-                "clipforge-library-{label}-{}-{nanos}",
-                std::process::id()
+                "clipforge-library-{label}-{}",
+                crate::testutil::unique()
             ));
             fs::create_dir_all(&dir).unwrap();
             Self(dir)

@@ -2,6 +2,8 @@ import * as api from "../api";
 import { bufferLabel, type BufferStatus } from "../lib/buffer";
 import { validateClipName } from "../lib/clipname";
 import { clipTitle, groupByDay, type ClipInfo } from "../lib/clips";
+import { displayAccelerator } from "../lib/hotkey";
+import { DEFAULT_SAVE_SHORTCUT } from "../lib/settings";
 import { formatBytes, formatDuration, formatRelativeTime } from "../lib/format";
 import { confirmDialog } from "./modal";
 import { h, svg } from "./dom";
@@ -16,6 +18,8 @@ export interface Gallery {
   /** Highlight a freshly saved clip (call before `refresh`). */
   markFresh(name: string): void;
   setBufferStatus(status: BufferStatus): void;
+  /** The global shortcut that saves a clip changed: show the new one. */
+  setSaveShortcut(accelerator: string): void;
 }
 
 const PREVIEW_FRAME = 0.1; // seconds; forces the webview to paint a thumbnail
@@ -27,7 +31,11 @@ export function createGallery(root: HTMLElement): Gallery {
   let requestSeq = 0;
   let renaming = false;
   let headerEl: HTMLElement | null = null;
+  let saveShortcut = DEFAULT_SAVE_SHORTCUT;
   const fresh = new Set<string>();
+
+  const hotkeyLabel = () =>
+    displayAccelerator(saveShortcut, navigator.userAgent.includes("Mac"));
 
   const lazyVideos = new IntersectionObserver(
     (entries) => {
@@ -318,6 +326,17 @@ export function createGallery(root: HTMLElement): Gallery {
   return {
     refresh,
     markFresh: (name) => fresh.add(name),
+    setSaveShortcut(accelerator) {
+      if (accelerator === saveShortcut) return;
+      saveShortcut = accelerator;
+      if (loaded && clips.length === 0) {
+        render(); // the empty state mentions it too
+      } else if (headerEl) {
+        const next = header();
+        headerEl.replaceWith(next);
+        headerEl = next;
+      }
+    },
     setBufferStatus(status) {
       buffer = status;
       // Only the header changes; re-rendering the grid would reload every thumbnail.
@@ -333,8 +352,4 @@ export function createGallery(root: HTMLElement): Gallery {
 function countLabel(n: number): string {
   if (n === 0) return "Sin clips";
   return n === 1 ? "1 clip" : `${n} clips`;
-}
-
-function hotkeyLabel(): string {
-  return navigator.userAgent.includes("Mac") ? "⌘⇧S" : "Ctrl+Shift+S";
 }

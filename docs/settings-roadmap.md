@@ -7,6 +7,7 @@ surprises, and the settings planned next (in the order we would build them).
 
 | Setting | Where it lives | Applied |
 |---|---|---|
+| Save-clip shortcut | `settings.shortcuts.saveClip` (default `CommandOrControl+Shift+S`) | live: the OS registration moves, all or nothing (`shortcuts.rs`); the tray hint and the gallery button follow |
 | Microphone on/off | `settings.microphone.enabled` | live: only the microphone stream starts/stops |
 | Microphone device | `settings.microphone.deviceId` (`null` = system default) | live: restarts only the microphone stream |
 | Microphone mode (mixed / separate track) | `settings.microphone.mode` | live: restarts only the microphone stream |
@@ -34,6 +35,14 @@ surprises, and the settings planned next (in the order we would build them).
    backend), and an ignored real-hardware test if it touches a device.
 6. **Document** — tick the item in `milestones/milestone-3.md`.
 
+Global shortcuts (save clip, mute) are settings like any other, but their
+registration goes through `app/src-tauri/src/shortcuts.rs`: `switch` moves them
+all-or-nothing (and lets two shortcuts swap keys), `register_all` never stops the
+app from starting when another application owns the keys (the user gets a
+notification instead). To add one: a field in `ShortcutSettings`, an entry in
+`shortcuts::wanted`, a `ShortcutAction`, and a `createShortcutRecorder` row in
+the UI that lists the other shortcuts in its `conflict` callback.
+
 Rules we keep: the microphone (and any new input) is opt-in; a failing audio
 path never stops the video; secrets and paths never go to the webview unless
 the setting is about them.
@@ -50,7 +59,6 @@ order, not a promise.
 | Buffer length (60 / 120 / 180 s) | History vs. RAM | S | `BufferConfig`; restarting the buffer loses what's recorded |
 | Default clip length (15 / 30 / 60 / 120 s) | Fixed at 30 s today | S | `DEFAULT_CLIP_SECONDS` in `recorder.rs` |
 | Clips folder | Fixed at `~/Movies/ClipForge` | S | The `asset` protocol scope in `tauri.conf.json` must follow it |
-| Save-clip shortcut | Fixed at ⌘/Ctrl+Shift+S | M | Reuse the key recorder of the mute shortcut |
 | Launch at login | Buffer already running when you play | S | Autostart plugin |
 | Video quality (Low / Medium / High / Custom) | Resolution, fps, bitrate | M | `EncoderConfig`; restarts the video capture (warn: buffer is lost) |
 | Post-roll (keep recording 0 / 5 / 10 / 15 s after the shortcut) | The clip includes how the play ended, not only what led to it | M | Save with a delay: wait N s, then extract. Today the clip ends at the key press |

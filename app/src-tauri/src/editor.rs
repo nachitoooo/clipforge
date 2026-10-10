@@ -181,7 +181,6 @@ pub fn trim_clip(dir: &Path, request: &TrimRequest) -> Result<TrimResult, String
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Scratch clips folder holding a copy of the 4 s test clip
     /// (`core/tests/fixtures/tone.mp4`: one keyframe per second, silence for
@@ -190,13 +189,9 @@ mod tests {
 
     impl Folder {
         fn new(label: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
             let dir = std::env::temp_dir().join(format!(
-                "clipforge-editor-{label}-{}-{nanos}",
-                std::process::id()
+                "clipforge-editor-{label}-{}",
+                crate::testutil::unique()
             ));
             fs::create_dir_all(&dir).unwrap();
             let fixture =

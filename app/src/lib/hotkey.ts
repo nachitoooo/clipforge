@@ -12,10 +12,12 @@ export interface KeyEventLike {
   shiftKey: boolean;
 }
 
-/** Shortcuts other features own (mirrors `reserved_shortcuts` in lib.rs). */
-export const RESERVED_SHORTCUTS: { accelerator: string; owner: string }[] = [
-  { accelerator: "CommandOrControl+Shift+S", owner: "Guardar clip" },
-];
+/** A shortcut some feature already uses. */
+export interface ShortcutOwner {
+  accelerator: string;
+  /** What the feature is called in messages, e.g. `Guardar clip`. */
+  owner: string;
+}
 
 export type CaptureResult =
   | { kind: "waiting" } // only modifiers so far
@@ -151,8 +153,8 @@ export function displayAccelerator(accelerator: string, isMac: boolean): string 
   return [...normalized.map((m) => PC_NAMES[m] ?? m), shownKey].join("+");
 }
 
-/** Name of the feature that already uses `accelerator`, if any. */
-export function reservedOwner(accelerator: string): string | null {
-  const hit = RESERVED_SHORTCUTS.find((r) => sameAccelerator(r.accelerator, accelerator));
+/** Name of the feature in `taken` that already uses `accelerator`, if any. */
+export function ownerOf(accelerator: string, taken: ShortcutOwner[]): string | null {
+  const hit = taken.find((t) => sameAccelerator(t.accelerator, accelerator));
   return hit?.owner ?? null;
 }

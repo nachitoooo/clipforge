@@ -81,11 +81,16 @@ window.addEventListener("DOMContentLoaded", async () => {
       void gallery.refresh();
     }),
     api.onBufferChanged((status) => gallery.setBufferStatus(status)),
+    api.onSettingsChanged((settings) => gallery.setSaveShortcut(settings.shortcuts.saveClip)),
   ]);
 
   api
     .bufferStatus()
     .then((status) => gallery.setBufferStatus(status))
+    .catch((e) => toast(String(e), "error"));
+  api
+    .getSettings()
+    .then((settings) => gallery.setSaveShortcut(settings.shortcuts.saveClip))
     .catch((e) => toast(String(e), "error"));
   void gallery.refresh();
 });

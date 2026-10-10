@@ -98,8 +98,10 @@ would mean decoding and re-encoding.
 Settings (`app/src-tauri/src/settings.rs`): every field has a serde default, one
 validation gate (`Settings::validated`), and an apply path that is either live
 (atomics) or restarts only the affected part. Anything that restarts the video
-capture empties the buffer, so it needs a warning in the UI. See
-`docs/settings-roadmap.md` for the checklist and the planned settings.
+capture empties the buffer, so it needs a warning in the UI. Global
+shortcuts (save clip, mute) are settings too and are (un)registered only through
+`shortcuts.rs`. See `docs/settings-roadmap.md` for the checklist and the planned
+settings.
 
 Key design rule: **the ring buffer stores encoded frames** (not raw), so RAM
 stays bounded (~100MB for 2 min of 1080p60) and saving a clip is a remux, not

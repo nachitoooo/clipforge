@@ -19,6 +19,7 @@ pub const SETTINGS_VERSION: u32 = 1;
 pub const GAIN_MIN_PERCENT: u32 = 0;
 pub const GAIN_MAX_PERCENT: u32 = 200;
 pub const DEFAULT_MUTE_SHORTCUT: &str = "CommandOrControl+Shift+M";
+pub const DEFAULT_SAVE_SHORTCUT: &str = "CommandOrControl+Shift+S";
 
 /// How the microphone ends up in a saved clip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -61,10 +62,28 @@ impl Default for MicrophoneSettings {
     }
 }
 
+/// Global shortcuts that aren't tied to one feature's section (the
+/// microphone's mute shortcut lives with the microphone).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ShortcutSettings {
+    /// Saves the last seconds as a clip, from any app or game.
+    pub save_clip: String,
+}
+
+impl Default for ShortcutSettings {
+    fn default() -> Self {
+        Self {
+            save_clip: DEFAULT_SAVE_SHORTCUT.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub version: u32,
+    pub shortcuts: ShortcutSettings,
     pub microphone: MicrophoneSettings,
 }
 
@@ -72,17 +91,35 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             version: SETTINGS_VERSION,
+            shortcuts: ShortcutSettings::default(),
             microphone: MicrophoneSettings::default(),
         }
     }
 }
 
+fn parse_shortcut(accelerator: &str) -> Result<Shortcut, String> {
+    Shortcut::from_str(accelerator.trim())
+        .map_err(|_| format!("atajo no válido: «{}»", accelerator.trim()))
+}
+
 impl Settings {
     /// Normalize and check a settings object coming from the UI (or a file).
-    /// `reserved` lists shortcuts other features own; the mute shortcut must
-    /// not collide with them.
-    pub fn validated(mut self, reserved: &[Shortcut]) -> Result<Self, String> {
+    /// Every global shortcut must parse and no two features may share one.
+    pub fn validated(mut self) -> Result<Self, String> {
         self.version = SETTINGS_VERSION;
+
+        let save_text = self.shortcuts.save_clip.trim().to_string();
+        let save = parse_shortcut(&save_text)?;
+        let mute_text = self.microphone.mute_shortcut.trim().to_string();
+        let mute = parse_shortcut(&mute_text)?;
+        if save == mute {
+            return Err(format!(
+                "el atajo «{save_text}» no puede ser a la vez para guardar clips y para silenciar el micrófono"
+            ));
+        }
+        self.shortcuts.save_clip = save_text;
+        self.microphone.mute_shortcut = mute_text;
+
         let mic = &mut self.microphone;
 
         mic.gain_percent = mic.gain_percent.clamp(GAIN_MIN_PERCENT, GAIN_MAX_PERCENT);
@@ -92,16 +129,31 @@ impl Settings {
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty());
 
-        let accelerator = mic.mute_shortcut.trim();
-        let shortcut = Shortcut::from_str(accelerator)
-            .map_err(|_| format!("atajo no válido: «{accelerator}»"))?;
-        if reserved.contains(&shortcut) {
-            return Err(format!(
-                "el atajo «{accelerator}» ya lo usa otra función de ClipForge"
-            ));
-        }
-        mic.mute_shortcut = accelerator.to_string();
         Ok(self)
+    }
+
+    /// Settings read from a file somebody may have edited by hand: keep what is
+    /// usable and put anything that would stop the app from starting (a
+    /// shortcut that doesn't parse, two features on the same keys) back to its
+    /// default. The result always passes [`Settings::validated`].
+    fn repaired(mut self) -> Self {
+        if parse_shortcut(&self.shortcuts.save_clip).is_err() {
+            self.shortcuts.save_clip = DEFAULT_SAVE_SHORTCUT.to_string();
+        }
+        if parse_shortcut(&self.microphone.mute_shortcut).is_err() {
+            self.microphone.mute_shortcut = DEFAULT_MUTE_SHORTCUT.to_string();
+        }
+        if parse_shortcut(&self.shortcuts.save_clip).ok()
+            == parse_shortcut(&self.microphone.mute_shortcut).ok()
+        {
+            self.microphone.mute_shortcut = DEFAULT_MUTE_SHORTCUT.to_string();
+            if parse_shortcut(&self.shortcuts.save_clip).ok()
+                == parse_shortcut(&self.microphone.mute_shortcut).ok()
+            {
+                self.shortcuts.save_clip = DEFAULT_SAVE_SHORTCUT.to_string();
+            }
+        }
+        self
     }
 }
 
@@ -116,12 +168,14 @@ impl SettingsStore {
     /// aside to `settings.json.bak` (so nothing is lost) and defaults apply.
     pub fn load(path: PathBuf) -> Self {
         let settings = match fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str::<Settings>(&text).unwrap_or_else(|e| {
-                eprintln!("clipforge: settings file unreadable ({e}); using defaults");
-                let backup = path.with_extension("json.bak");
-                fs::rename(&path, backup).ok();
-                Settings::default()
-            }),
+            Ok(text) => serde_json::from_str::<Settings>(&text)
+                .map(Settings::repaired)
+                .unwrap_or_else(|e| {
+                    eprintln!("clipforge: settings file unreadable ({e}); using defaults");
+                    let backup = path.with_extension("json.bak");
+                    fs::rename(&path, backup).ok();
+                    Settings::default()
+                }),
             Err(_) => Settings::default(),
         };
         Self {
@@ -160,20 +214,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Scratch directory removed on drop.
     struct TempDir(PathBuf);
 
     impl TempDir {
         fn new(label: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
             let dir = std::env::temp_dir().join(format!(
-                "clipforge-settings-{label}-{}-{nanos}",
-                std::process::id()
+                "clipforge-settings-{label}-{}",
+                crate::testutil::unique()
             ));
             fs::create_dir_all(&dir).unwrap();
             Self(dir)
@@ -188,10 +237,6 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).ok();
         }
-    }
-
-    fn save_clip() -> Shortcut {
-        Shortcut::from_str("CommandOrControl+Shift+S").unwrap()
     }
 
     #[test]
@@ -280,13 +325,13 @@ mod tests {
         let mut s = Settings::default();
         s.microphone.gain_percent = 9_999;
         s.microphone.device_id = Some("   ".into());
-        let v = s.validated(&[save_clip()]).unwrap();
+        let v = s.validated().unwrap();
         assert_eq!(v.microphone.gain_percent, GAIN_MAX_PERCENT);
         assert_eq!(v.microphone.device_id, None);
 
         let mut s = Settings::default();
         s.microphone.device_id = Some("  coreaudio:USB  ".into());
-        let v = s.validated(&[save_clip()]).unwrap();
+        let v = s.validated().unwrap();
         assert_eq!(v.microphone.device_id.as_deref(), Some("coreaudio:USB"));
     }
 
@@ -294,22 +339,112 @@ mod tests {
     fn validation_rejects_bad_and_conflicting_shortcuts() {
         let mut s = Settings::default();
         s.microphone.mute_shortcut = "Banana".into();
-        assert!(s
-            .validated(&[save_clip()])
-            .unwrap_err()
-            .contains("no válido"));
+        assert!(s.validated().unwrap_err().contains("no válido"));
 
         let mut s = Settings::default();
         s.microphone.mute_shortcut = "CommandOrControl+Shift+S".into();
-        assert!(s
-            .validated(&[save_clip()])
-            .unwrap_err()
-            .contains("ya lo usa"));
+        assert!(s.validated().unwrap_err().contains("no puede ser a la vez"));
     }
 
     #[test]
-    fn the_default_shortcut_is_valid_and_free() {
-        assert!(Settings::default().validated(&[save_clip()]).is_ok());
+    fn the_default_shortcuts_are_valid_and_distinct() {
+        let s = Settings::default();
+        assert_eq!(s.shortcuts.save_clip, DEFAULT_SAVE_SHORTCUT);
+        assert!(s.validated().is_ok());
+    }
+
+    #[test]
+    fn the_save_shortcut_can_be_changed() {
+        let mut s = Settings::default();
+        s.shortcuts.save_clip = "  Alt+F9  ".into();
+        let v = s.validated().unwrap();
+        assert_eq!(v.shortcuts.save_clip, "Alt+F9", "trimmed");
+    }
+
+    #[test]
+    fn a_bad_save_shortcut_is_refused() {
+        for bad in ["", "Banana", "Shift+", "Ctrl+Ctrl+"] {
+            let mut s = Settings::default();
+            s.shortcuts.save_clip = bad.into();
+            let err = s.validated().unwrap_err();
+            assert!(err.contains("no válido"), "{bad:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn the_two_shortcuts_cannot_be_the_same_however_they_are_spelled() {
+        let mut s = Settings::default();
+        s.shortcuts.save_clip = "CmdOrCtrl+Shift+M".into(); // the mute default
+        assert!(s.validated().unwrap_err().contains("no puede ser a la vez"));
+
+        let mut s = Settings::default();
+        s.microphone.mute_shortcut = "Shift+CommandOrControl+S".into(); // the save default
+        assert!(s.validated().unwrap_err().contains("no puede ser a la vez"));
+
+        // Swapping the two is fine.
+        let mut s = Settings::default();
+        s.shortcuts.save_clip = DEFAULT_MUTE_SHORTCUT.into();
+        s.microphone.mute_shortcut = DEFAULT_SAVE_SHORTCUT.into();
+        assert!(s.validated().is_ok());
+    }
+
+    #[test]
+    fn a_file_without_shortcuts_gets_the_default_save_shortcut() {
+        let dir = TempDir::new("no-shortcuts");
+        fs::write(dir.file(), r#"{"microphone":{"enabled":true}}"#).unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.save_clip, DEFAULT_SAVE_SHORTCUT);
+    }
+
+    #[test]
+    fn the_save_shortcut_survives_a_restart() {
+        let dir = TempDir::new("shortcut-roundtrip");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.shortcuts.save_clip = "Alt+F9".into();
+        store.replace(s).unwrap();
+        assert_eq!(
+            SettingsStore::load(dir.file()).get().shortcuts.save_clip,
+            "Alt+F9"
+        );
+    }
+
+    #[test]
+    fn a_hand_edited_file_cannot_stop_the_app_from_starting() {
+        let dir = TempDir::new("repair");
+
+        // A shortcut that doesn't parse goes back to its default.
+        fs::write(
+            dir.file(),
+            r#"{"shortcuts":{"saveClip":"nonsense"},"microphone":{"muteShortcut":""}}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.save_clip, DEFAULT_SAVE_SHORTCUT);
+        assert_eq!(s.microphone.mute_shortcut, DEFAULT_MUTE_SHORTCUT);
+
+        // Two features on the same keys: the microphone gives way...
+        fs::write(
+            dir.file(),
+            r#"{"shortcuts":{"saveClip":"Alt+F9"},"microphone":{"muteShortcut":"Alt+F9"}}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.save_clip, "Alt+F9");
+        assert_eq!(s.microphone.mute_shortcut, DEFAULT_MUTE_SHORTCUT);
+
+        // ...unless that is where it was sent, then everything is the default.
+        fs::write(
+            dir.file(),
+            r#"{"shortcuts":{"saveClip":"CommandOrControl+Shift+M"},"microphone":{"muteShortcut":"CommandOrControl+Shift+M"}}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.save_clip, DEFAULT_SAVE_SHORTCUT);
+        assert_eq!(s.microphone.mute_shortcut, DEFAULT_MUTE_SHORTCUT);
+
+        // Whatever it repaired passes validation.
+        assert!(s.validated().is_ok());
     }
 
     #[test]
@@ -318,6 +453,7 @@ mod tests {
         assert!(json["microphone"]["gainPercent"].is_number());
         assert!(json["microphone"]["deviceId"].is_null());
         assert_eq!(json["microphone"]["mode"], "mixed");
+        assert_eq!(json["shortcuts"]["saveClip"], "CommandOrControl+Shift+S");
     }
 
     #[test]
@@ -339,9 +475,17 @@ mod tests {
         ] {
             let mut s = Settings::default();
             s.microphone.mute_shortcut = accelerator.to_string();
+            s.shortcuts.save_clip = "Control+Alt+Shift+F12".to_string();
             assert!(
-                s.validated(&[save_clip()]).is_ok(),
-                "{accelerator} should be accepted"
+                s.validated().is_ok(),
+                "{accelerator} should be accepted as the mute shortcut"
+            );
+            let mut s = Settings::default();
+            s.shortcuts.save_clip = accelerator.to_string();
+            s.microphone.mute_shortcut = "Control+Alt+Shift+F12".to_string();
+            assert!(
+                s.validated().is_ok(),
+                "{accelerator} should be accepted as the save shortcut"
             );
         }
     }

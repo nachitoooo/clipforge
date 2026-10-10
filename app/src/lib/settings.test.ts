@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_MUTE_SHORTCUT,
+  DEFAULT_SAVE_SHORTCUT,
   clampGain,
   defaultSettings,
   formatGain,
   gainToDb,
   micStateSummary,
   withMicrophone,
+  withShortcuts,
   type MicStatus,
 } from "./settings";
 
@@ -47,6 +50,20 @@ describe("settings helpers", () => {
     expect(s.microphone.mode).toBe("mixed");
     expect(s.microphone.gainPercent).toBe(100);
     expect(s.microphone.muteShortcut).toBe("CommandOrControl+Shift+M");
+  });
+
+  it("defaults the save shortcut to the one ClipForge always had", () => {
+    expect(defaultSettings().shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
+    expect(DEFAULT_SAVE_SHORTCUT).toBe("CommandOrControl+Shift+S");
+    expect(DEFAULT_MUTE_SHORTCUT).toBe("CommandOrControl+Shift+M");
+  });
+
+  it("patches the shortcuts without touching the rest or the original", () => {
+    const original = defaultSettings();
+    const next = withShortcuts(original, { saveClip: "Alt+F9" });
+    expect(next.shortcuts.saveClip).toBe("Alt+F9");
+    expect(next.microphone).toBe(original.microphone);
+    expect(original.shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
   });
 
   it("patches the microphone without mutating the original", () => {

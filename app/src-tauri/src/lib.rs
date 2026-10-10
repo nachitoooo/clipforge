@@ -4,8 +4,30 @@ mod library;
 mod mic;
 mod recorder;
 mod settings;
+mod shortcuts;
 
-use std::str::FromStr;
+/// Helpers shared by the unit tests.
+#[cfg(test)]
+mod testutil {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A name that is unique per call, even for two tests started in the same
+    /// clock tick (the clock alone is not fine-grained enough: tests sharing a
+    /// scratch folder raced on its files).
+    pub fn unique() -> String {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!(
+            "{}-{nanos}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,25 +36,44 @@ use dispatch::{dispatch, Actions, Command, MuteOutcome};
 use mic::{MicDevice, MicStatus};
 use recorder::{BufferStatus, Recorder, DEFAULT_CLIP_SECONDS};
 use settings::{Settings, SettingsStore};
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use shortcuts::{Registry, ShortcutAction};
+use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, RunEvent};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Wry};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
-/// Global hotkey for "save clip": Cmd+Shift+S (macOS) / Ctrl+Shift+S.
-fn save_clip_shortcut() -> Shortcut {
-    #[cfg(target_os = "macos")]
-    let modifiers = Modifiers::SUPER | Modifiers::SHIFT;
-    #[cfg(not(target_os = "macos"))]
-    let modifiers = Modifiers::CONTROL | Modifiers::SHIFT;
-    Shortcut::new(Some(modifiers), Code::KeyS)
+/// The OS-level shortcut registrations, through the Tauri plugin.
+struct AppRegistry<'a>(&'a AppHandle);
+
+impl Registry for AppRegistry<'_> {
+    fn register(&self, shortcut: Shortcut) -> Result<(), String> {
+        self.0
+            .global_shortcut()
+            .register(shortcut)
+            .map_err(|e| e.to_string())
+    }
+
+    fn unregister(&self, shortcut: Shortcut) {
+        self.0.global_shortcut().unregister(shortcut).ok();
+    }
 }
 
-/// Shortcuts owned by other features: a user-chosen one must not collide.
-fn reserved_shortcuts() -> Vec<Shortcut> {
-    vec![save_clip_shortcut()]
+/// The tray menu entries whose label depends on a setting.
+struct TrayItems {
+    save: MenuItem<Wry>,
+}
+
+/// Show the current save shortcut next to the tray's "save clip" entry.
+fn show_save_shortcut_in_tray(app: &AppHandle, accelerator: &str) {
+    if let Err(e) = app
+        .state::<TrayItems>()
+        .save
+        .set_accelerator(Some(accelerator))
+    {
+        eprintln!("clipforge: tray shortcut hint «{accelerator}»: {e}");
+    }
 }
 
 /// The real [`Actions`] implementation: routes dispatcher decisions to the
@@ -124,7 +165,7 @@ impl Actions for AppActions {
             return Ok(MuteOutcome::MicOff);
         }
         next.microphone.muted = !next.microphone.muted;
-        let saved = store.replace(next.validated(&reserved_shortcuts())?)?;
+        let saved = store.replace(next.validated()?)?;
         self.app.emit("settings-changed", &saved).ok();
         // Muting only flips an atomic: apply it right here, no device work.
         let status = self.recorder().apply_microphone();
@@ -253,41 +294,27 @@ fn get_settings(store: tauri::State<'_, Arc<SettingsStore>>) -> Settings {
     store.get()
 }
 
-/// Move the mute hotkey. The new one is registered first, so if the OS or
-/// another app refuses it nothing has changed yet.
-fn swap_mute_shortcut(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
-    let shortcuts = app.global_shortcut();
-    let new_shortcut = Shortcut::from_str(new).map_err(|_| format!("atajo no válido: «{new}»"))?;
-    shortcuts.register(new_shortcut).map_err(|e| {
-        format!("no se pudo registrar el atajo «{new}» (¿lo usa otra aplicación?): {e}")
-    })?;
-    if let Ok(old_shortcut) = Shortcut::from_str(old) {
-        shortcuts.unregister(old_shortcut).ok();
-    }
-    Ok(())
-}
-
 #[tauri::command]
 fn update_settings(
     app: AppHandle,
     store: tauri::State<'_, Arc<SettingsStore>>,
     settings: Settings,
 ) -> Result<Settings, String> {
-    let validated = settings.validated(&reserved_shortcuts())?;
-    let old_shortcut = store.get().microphone.mute_shortcut;
-    let new_shortcut = validated.microphone.mute_shortcut.clone();
-    if old_shortcut != new_shortcut {
-        swap_mute_shortcut(&app, &old_shortcut, &new_shortcut)?;
-    }
-    let saved = match store.replace(validated) {
+    let validated = settings.validated()?;
+    let previous = store.get();
+    // Move the global shortcuts first: if the OS or another app refuses one,
+    // nothing has changed yet.
+    shortcuts::switch(&AppRegistry(&app), &previous, &validated)?;
+    let saved = match store.replace(validated.clone()) {
         Ok(saved) => saved,
         Err(e) => {
-            if old_shortcut != new_shortcut {
-                swap_mute_shortcut(&app, &new_shortcut, &old_shortcut).ok();
-            }
+            shortcuts::switch(&AppRegistry(&app), &validated, &previous).ok();
             return Err(e);
         }
     };
+    if saved.shortcuts.save_clip != previous.shortcuts.save_clip {
+        show_save_shortcut_in_tray(&app, &saved.shortcuts.save_clip);
+    }
     app.emit("settings-changed", &saved).ok();
     app.state::<Recorder>().apply_live_controls();
     apply_microphone_in_background(&app);
@@ -331,17 +358,15 @@ pub fn run() {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-                    if *shortcut == save_clip_shortcut() {
-                        run_command(app.app_handle(), Command::SaveClip);
-                        return;
-                    }
-                    let mute = app
-                        .state::<Arc<SettingsStore>>()
-                        .get()
-                        .microphone
-                        .mute_shortcut;
-                    if Shortcut::from_str(&mute).is_ok_and(|m| m == *shortcut) {
-                        run_command(app.app_handle(), Command::ToggleMicMute);
+                    let settings = app.state::<Arc<SettingsStore>>().get();
+                    match shortcuts::action_for(&settings, shortcut) {
+                        Some(ShortcutAction::SaveClip) => {
+                            run_command(app.app_handle(), Command::SaveClip)
+                        }
+                        Some(ShortcutAction::ToggleMicMute) => {
+                            run_command(app.app_handle(), Command::ToggleMicMute)
+                        }
+                        None => {}
                     }
                 })
                 .build(),
@@ -382,9 +407,8 @@ pub fn run() {
             // Tray menu (menu-bar icon on macOS).
             let toggle =
                 MenuItemBuilder::with_id("toggle_buffer", "Iniciar/Detener buffer").build(app)?;
-            let save = MenuItemBuilder::with_id("save_clip", "Guardar clip (últimos 30 s)")
-                .accelerator("CmdOrCtrl+Shift+S")
-                .build(app)?;
+            let save =
+                MenuItemBuilder::with_id("save_clip", "Guardar clip (últimos 30 s)").build(app)?;
             let mute = MenuItemBuilder::with_id("toggle_mic_mute", "Silenciar/activar micrófono")
                 .build(app)?;
             let open =
@@ -399,6 +423,8 @@ pub fn run() {
                 .separator()
                 .item(&quit)
                 .build()?;
+            app.manage(TrayItems { save: save.clone() });
+            show_save_shortcut_in_tray(app.handle(), &settings.get().shortcuts.save_clip);
             TrayIconBuilder::with_id("clipforge-tray")
                 .icon(app.default_window_icon().expect("app icon").clone())
                 .tooltip("ClipForge")
@@ -410,17 +436,10 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Global hotkeys. The save shortcut is essential; the mute one is
-            // a convenience, so failing to claim it must not stop the app.
-            app.global_shortcut().register(save_clip_shortcut())?;
-            match Shortcut::from_str(&settings.get().microphone.mute_shortcut) {
-                Ok(mute) => {
-                    if let Err(e) = app.global_shortcut().register(mute) {
-                        eprintln!("clipforge: mute shortcut unavailable: {e}");
-                    }
-                }
-                Err(e) => eprintln!("clipforge: mute shortcut invalid: {e}"),
-            }
+            // Global hotkeys. One that is taken by another app must not stop
+            // ClipForge from starting: tell the user (below) and carry on.
+            let shortcut_problems =
+                shortcuts::register_all(&AppRegistry(app.handle()), &settings.get());
 
             // Microphone watcher: streams the input level to the Settings
             // meter while it is open, and tells the UI whenever the
@@ -453,6 +472,9 @@ pub fn run() {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let actions = AppActions { app: handle };
+                for problem in shortcut_problems {
+                    actions.notify("ClipForge — atajo no disponible", &problem);
+                }
                 match actions.start_buffer() {
                     Ok(()) => actions.notify("ClipForge", "Buffer de replay iniciado"),
                     Err(e) => actions.notify("ClipForge — no se pudo iniciar la captura", &e),
