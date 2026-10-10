@@ -2,6 +2,8 @@
 //! synthetic [`test_pattern::TestPatternSource`] so the whole pipeline is
 //! testable without a real screen.
 
+pub mod clock;
+pub mod combined;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod test_pattern;
@@ -10,6 +12,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::mpsc;
+
+use crate::audio::AudioChunk;
 
 /// A single uncompressed frame handed from a capture source to the encoder.
 ///
@@ -50,6 +54,8 @@ impl std::fmt::Debug for RawFrame {
 pub enum CaptureError {
     #[error("screen recording permission denied — grant it in System Settings → Privacy & Security → Screen Recording, then restart the app")]
     PermissionDenied,
+    #[error("microphone permission denied — grant it in System Settings → Privacy & Security → Microphone (Windows: Settings → Privacy → Microphone, \"Let desktop apps access your microphone\"), then try again")]
+    MicrophonePermissionDenied,
     #[error("no capturable display found")]
     NoDisplay,
     #[error("capture source already started")]
@@ -94,4 +100,30 @@ pub trait FrameSource: Send {
 
     /// Delivery/drop counters for the current (or last) session.
     fn stats(&self) -> CaptureStats;
+
+    /// Audio captured alongside the video, stamped on the same clock. Only
+    /// sources that capture audio return `Some`, and only after `start`; the
+    /// stream can be taken once. Sources without audio keep this default.
+    fn take_audio(&mut self) -> Option<mpsc::Receiver<AudioChunk>> {
+        None
+    }
+
+    /// The clock epoch this source stamps its frames with, available after
+    /// `start`. Other capture streams (the microphone) must share it to line
+    /// up with the video. Sources with timestamps of their own return `None`.
+    fn epoch(&self) -> Option<clock::SharedEpoch> {
+        None
+    }
+}
+
+/// A source of uncompressed audio (system loopback or a test tone).
+///
+/// Chunk timestamps share the clock — and the epoch, see
+/// [`clock::SharedEpoch`] — of the video frames, so the two line up when a
+/// clip is cut.
+pub trait AudioSource: Send {
+    fn start(&mut self) -> Result<mpsc::Receiver<AudioChunk>, CaptureError>;
+
+    /// Stop capturing and release backend resources. Idempotent.
+    fn stop(&mut self);
 }

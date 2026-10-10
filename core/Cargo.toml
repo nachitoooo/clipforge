@@ -9,6 +9,7 @@ description = "ClipForge core engine: capture, encode, ring buffer, clip extract
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 mp4 = "0.14"
+symphonia = { version = "0.5", default-features = false, features = ["aac"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
 
@@ -16,6 +17,20 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "m
 apple-cf = { version = "0.9", default-features = false, features = ["cm", "cv", "iosurface"] }
 screencapturekit = "8.0"
 videotoolbox = "0.18"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+cpal = "0.18"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Performance",
+    "Win32_System_Variant",
+] }
 
 [dev-dependencies]
 mp4 = "0.14"

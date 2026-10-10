@@ -1,9 +1,11 @@
 //! Clip output: extract the last N seconds from the replay buffer and save
 //! them as an .mp4 ([`ClipService`]), muxing in-process ([`mp4mux`]) — a
-//! container write, never a re-encode. The ffmpeg sidecar remains reserved
-//! for stream-copy trimming of existing files (Milestone 3).
+//! container write, never a re-encode. [`trim`] edits saved clips the same
+//! way (cut, drop audio tracks, draw waveforms) without an ffmpeg sidecar.
 
+pub mod edit_list;
 pub mod mp4mux;
+pub mod trim;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -13,7 +15,7 @@ use thiserror::Error;
 
 use crate::buffer::ReplayBuffer;
 use crate::encode::ParameterSets;
-use mp4mux::{write_mp4, MuxError, VideoParams};
+use mp4mux::{write_mp4_with_tracks, AudioParams, MuxError, VideoParams};
 
 #[derive(Debug, Error)]
 pub enum ClipError {
@@ -42,6 +44,11 @@ pub struct SavedClip {
     /// Track duration actually written (≥ requested, keyframe-aligned).
     pub duration: Duration,
     pub packets: usize,
+    /// AAC packets muxed alongside the video in the main audio track (0 for
+    /// a silent clip).
+    pub audio_packets: usize,
+    /// AAC packets of the separate microphone track (0 when there is none).
+    pub mic_packets: usize,
     pub bytes: u64,
 }
 
@@ -52,6 +59,10 @@ pub struct ClipService {
     buffer: Arc<Mutex<ReplayBuffer>>,
     clips_dir: PathBuf,
     stream_info: Mutex<Option<StreamInfo>>,
+    /// Set once an audio encoder is running; without it clips are video-only.
+    audio_info: Mutex<Option<AudioParams>>,
+    /// Set while the microphone is recorded as its own track.
+    mic_info: Mutex<Option<AudioParams>>,
 }
 
 impl ClipService {
@@ -60,6 +71,8 @@ impl ClipService {
             buffer,
             clips_dir: clips_dir.into(),
             stream_info: Mutex::new(None),
+            audio_info: Mutex::new(None),
+            mic_info: Mutex::new(None),
         }
     }
 
@@ -67,6 +80,17 @@ impl ClipService {
     /// clips will be muxed with.
     pub fn set_stream_info(&self, info: StreamInfo) {
         *self.stream_info.lock().expect("stream_info lock") = Some(info);
+    }
+
+    /// Announce the audio format of the packets the buffer receives; from
+    /// now on clips carry an AAC track whenever the extracted span has audio.
+    pub fn set_audio_info(&self, info: AudioParams) {
+        *self.audio_info.lock().expect("audio_info lock") = Some(info);
+    }
+
+    /// Announce (or withdraw, with `None`) the separate microphone track.
+    pub fn set_mic_info(&self, info: Option<AudioParams>) {
+        *self.mic_info.lock().expect("mic_info lock") = info;
     }
 
     pub fn clips_dir(&self) -> &Path {
@@ -85,24 +109,49 @@ impl ClipService {
             .clone()
             .ok_or(ClipError::NotReady)?;
 
-        let packets = {
+        let slice = {
             let buffer = self.buffer.lock().expect("replay buffer lock");
-            buffer.extract_last(duration)
+            buffer.extract_last_with_audio(duration)
         };
-        if packets.is_empty() {
+        if slice.video.is_empty() {
             return Err(ClipError::BufferEmpty);
+        }
+        let audio_info = *self.audio_info.lock().expect("audio_info lock");
+        let mic_info = *self.mic_info.lock().expect("mic_info lock");
+        let mut tracks: Vec<(&AudioParams, &[crate::audio::AudioPacket])> = Vec::new();
+        if let Some(params) = audio_info.as_ref() {
+            tracks.push((params, slice.audio.as_slice()));
+        }
+        if let Some(params) = mic_info.as_ref() {
+            tracks.push((params, slice.mic.as_slice()));
         }
 
         std::fs::create_dir_all(&self.clips_dir)
             .map_err(|e| ClipError::ClipsDir(self.clips_dir.clone(), e))?;
         let path = self.unique_clip_path();
-        let written = write_mp4(&path, &info.video, &info.parameter_sets, &packets)?;
+        let written = write_mp4_with_tracks(
+            &path,
+            &info.video,
+            &info.parameter_sets,
+            &slice.video,
+            &tracks,
+        )?;
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
         Ok(SavedClip {
             path,
             duration: written,
-            packets: packets.len(),
+            packets: slice.video.len(),
+            audio_packets: if audio_info.is_some() {
+                slice.audio.len()
+            } else {
+                0
+            },
+            mic_packets: if mic_info.is_some() {
+                slice.mic.len()
+            } else {
+                0
+            },
             bytes,
         })
     }

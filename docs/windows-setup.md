@@ -57,3 +57,15 @@ Until F-2.4 lands, starting the buffer on Windows reports
   as reference implementations).
 - Platform-specific integration tests are `#[ignore]`d and run with
   `cargo test -p clipforge-core -- --ignored` on the matching OS.
+- Audio (F-2.5) has Windows implementations that have **not been run yet**:
+  WASAPI loopback capture (`core/src/audio/wasapi.rs`) and the Media Foundation
+  AAC encoder (`core/src/audio/aac_mediafoundation.rs`). On a Windows machine,
+  run `cargo test -p clipforge-core --test windows_audio -- --ignored` and
+  report anything that fails: those tests were written without access to
+  Windows. They only become audible in the app once F-2.4 (Windows video
+  capture) is wired in.
+- The microphone (`core/src/audio/mic.rs`, `cpal` on WASAPI) is also unrun on
+  Windows. `cargo test -p clipforge-core --test windows_audio -- --ignored`
+  includes `cpal_lists_input_devices` and `cpal_microphone_smoke`; both need a
+  microphone and Windows' "Let desktop apps access your microphone" privacy
+  setting turned on.

@@ -7,7 +7,18 @@ pub enum Command {
     ToggleBuffer,
     SaveClip,
     OpenClipsFolder,
+    /// Silence or restore the microphone (hotkey or tray).
+    ToggleMicMute,
     Quit,
+}
+
+/// What toggling the microphone mute did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MuteOutcome {
+    Muted,
+    Unmuted,
+    /// The microphone is switched off in Settings, so there is nothing to mute.
+    MicOff,
 }
 
 impl Command {
@@ -17,6 +28,7 @@ impl Command {
             "toggle_buffer" => Some(Self::ToggleBuffer),
             "save_clip" => Some(Self::SaveClip),
             "open_folder" => Some(Self::OpenClipsFolder),
+            "toggle_mic_mute" => Some(Self::ToggleMicMute),
             "quit" => Some(Self::Quit),
             _ => None,
         }
@@ -32,6 +44,7 @@ pub trait Actions {
     /// Returns a human-readable description of the saved clip.
     fn save_clip(&self) -> Result<String, String>;
     fn open_clips_folder(&self);
+    fn toggle_mic_mute(&self) -> Result<MuteOutcome, String>;
     fn quit(&self);
     fn notify(&self, title: &str, body: &str);
 }
@@ -56,6 +69,15 @@ pub fn dispatch(command: Command, actions: &impl Actions) {
             Err(e) => actions.notify("No se pudo guardar el clip", &e),
         },
         Command::OpenClipsFolder => actions.open_clips_folder(),
+        Command::ToggleMicMute => match actions.toggle_mic_mute() {
+            Ok(MuteOutcome::Muted) => actions.notify("Micrófono", "Micrófono silenciado"),
+            Ok(MuteOutcome::Unmuted) => actions.notify("Micrófono", "Micrófono activado"),
+            Ok(MuteOutcome::MicOff) => actions.notify(
+                "Micrófono",
+                "El micrófono está desactivado: activalo en Configuración",
+            ),
+            Err(e) => actions.notify("No se pudo cambiar el micrófono", &e),
+        },
         Command::Quit => actions.quit(),
     }
 }
@@ -71,6 +93,7 @@ mod tests {
         save_result: Option<Result<String, String>>,
         calls: RefCell<Vec<String>>,
         notifications: RefCell<Vec<(String, String)>>,
+        mute_result: Option<Result<MuteOutcome, String>>,
     }
 
     impl Actions for Mock {
@@ -93,6 +116,10 @@ mod tests {
         fn open_clips_folder(&self) {
             self.calls.borrow_mut().push("open".into());
         }
+        fn toggle_mic_mute(&self) -> Result<MuteOutcome, String> {
+            self.calls.borrow_mut().push("mute".into());
+            self.mute_result.clone().unwrap_or(Ok(MuteOutcome::Muted))
+        }
         fn quit(&self) {
             self.calls.borrow_mut().push("quit".into());
         }
@@ -113,6 +140,10 @@ mod tests {
         assert_eq!(
             Command::from_menu_id("open_folder"),
             Some(Command::OpenClipsFolder)
+        );
+        assert_eq!(
+            Command::from_menu_id("toggle_mic_mute"),
+            Some(Command::ToggleMicMute)
         );
         assert_eq!(Command::from_menu_id("quit"), Some(Command::Quit));
         assert_eq!(Command::from_menu_id("unknown"), None);
@@ -158,5 +189,36 @@ mod tests {
         dispatch(Command::Quit, &mock);
         assert_eq!(mock.calls.borrow().as_slice(), ["open", "quit"]);
         assert!(mock.notifications.borrow().is_empty());
+    }
+
+    #[test]
+    fn mic_mute_hotkey_announces_each_outcome() {
+        for (result, expected) in [
+            (Ok(MuteOutcome::Muted), "silenciado"),
+            (Ok(MuteOutcome::Unmuted), "activado"),
+            (Ok(MuteOutcome::MicOff), "desactivado"),
+        ] {
+            let mock = Mock {
+                mute_result: Some(result),
+                ..Default::default()
+            };
+            dispatch(Command::ToggleMicMute, &mock);
+            assert_eq!(mock.calls.borrow().as_slice(), ["mute"]);
+            let notes = mock.notifications.borrow();
+            assert_eq!(notes.len(), 1);
+            assert!(notes[0].1.contains(expected), "{:?}", notes[0]);
+        }
+    }
+
+    #[test]
+    fn mic_mute_failure_is_reported_not_swallowed() {
+        let mock = Mock {
+            mute_result: Some(Err("disco lleno".into())),
+            ..Default::default()
+        };
+        dispatch(Command::ToggleMicMute, &mock);
+        let notes = mock.notifications.borrow();
+        assert_eq!(notes[0].0, "No se pudo cambiar el micrófono");
+        assert!(notes[0].1.contains("disco lleno"));
     }
 }

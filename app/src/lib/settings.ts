@@ -1,0 +1,127 @@
+/** Mirrors `settings.rs` / `mic.rs` in src-tauri (JSON is camelCase). */
+export type MicMode = "mixed" | "separate";
+
+export interface MicrophoneSettings {
+  enabled: boolean;
+  /** `null` follows the system default input. */
+  deviceId: string | null;
+  mode: MicMode;
+  gainPercent: number;
+  muted: boolean;
+  /** Global accelerator that toggles `muted`, e.g. `CommandOrControl+Shift+M`. */
+  muteShortcut: string;
+}
+
+export interface ShortcutSettings {
+  /** Global accelerator that saves a clip, e.g. `CommandOrControl+Shift+S`. */
+  saveClip: string;
+}
+
+export interface Settings {
+  version: number;
+  shortcuts: ShortcutSettings;
+  microphone: MicrophoneSettings;
+}
+
+export interface MicStatus {
+  enabled: boolean;
+  active: boolean;
+  muted: boolean;
+  error: string | null;
+  noSignal: boolean;
+  supported: boolean;
+}
+
+export interface MicDevice {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export const GAIN_MIN_PERCENT = 0;
+export const GAIN_MAX_PERCENT = 200;
+export const DEFAULT_GAIN_PERCENT = 100;
+export const DEFAULT_SAVE_SHORTCUT = "CommandOrControl+Shift+S";
+export const DEFAULT_MUTE_SHORTCUT = "CommandOrControl+Shift+M";
+
+export function defaultSettings(): Settings {
+  return {
+    version: 1,
+    shortcuts: { saveClip: DEFAULT_SAVE_SHORTCUT },
+    microphone: {
+      enabled: false,
+      deviceId: null,
+      mode: "mixed",
+      gainPercent: DEFAULT_GAIN_PERCENT,
+      muted: false,
+      muteShortcut: DEFAULT_MUTE_SHORTCUT,
+    },
+  };
+}
+
+/** Whole percent inside the allowed range; non-numbers fall back to 100. */
+export function clampGain(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_GAIN_PERCENT;
+  return Math.min(GAIN_MAX_PERCENT, Math.max(GAIN_MIN_PERCENT, Math.round(value)));
+}
+
+/** Gain in decibels; `-Infinity` at 0 %. */
+export function gainToDb(percent: number): number {
+  const linear = clampGain(percent) / 100;
+  return linear === 0 ? -Infinity : 20 * Math.log10(linear);
+}
+
+/** `100 % · 0 dB`, `150 % · +3,5 dB`, `0 % · silencio` (decimal comma). */
+export function formatGain(percent: number): string {
+  const p = clampGain(percent);
+  if (p === 0) return "0 % · silencio";
+  const db = gainToDb(p);
+  const rounded = Math.round(db * 10) / 10;
+  const text = Math.abs(rounded).toFixed(1).replace(".", ",");
+  const sign = rounded > 0 ? "+" : rounded < 0 ? "−" : "";
+  return `${p} % · ${sign}${text} dB`;
+}
+
+/** A copy of `settings` with the microphone section patched. */
+export function withMicrophone(
+  settings: Settings,
+  patch: Partial<MicrophoneSettings>,
+): Settings {
+  return { ...settings, microphone: { ...settings.microphone, ...patch } };
+}
+
+/** A copy of `settings` with the shortcuts section patched. */
+export function withShortcuts(settings: Settings, patch: Partial<ShortcutSettings>): Settings {
+  return { ...settings, shortcuts: { ...settings.shortcuts, ...patch } };
+}
+
+export const MIC_MODE_LABEL: Record<MicMode, string> = {
+  mixed: "Mezclado",
+  separate: "Pista separada",
+};
+
+/** What each way of saving the microphone means for the person using it. */
+export const MIC_MODE_NOTE: Record<MicMode, string> = {
+  mixed:
+    "Tu voz y el juego van juntos en una sola pista. Se escucha en cualquier lado (Discord, WhatsApp, el navegador), pero después no se puede silenciar la voz.",
+  separate:
+    "Tu voz va en una pista aparte, así se puede silenciar después. Ojo: muchos reproductores (Discord, los navegadores) solo tocan la primera pista y no se oiría tu voz al compartir el clip.",
+};
+
+export type Tone = "off" | "ok" | "warn" | "error";
+
+/** One line + colour summarizing the microphone's health. */
+export function micStateSummary(status: MicStatus | null): { tone: Tone; text: string } {
+  if (status === null) return { tone: "off", text: "Comprobando…" };
+  if (!status.supported) {
+    return { tone: "off", text: "Este sistema todavía no soporta el micrófono" };
+  }
+  if (!status.enabled) return { tone: "off", text: "Desactivado" };
+  if (status.error) return { tone: "error", text: "No funciona" };
+  if (!status.active) {
+    return { tone: "warn", text: "Se activa cuando empieza la grabación" };
+  }
+  if (status.muted) return { tone: "warn", text: "Silenciado" };
+  if (status.noSignal) return { tone: "warn", text: "Activo, pero no se oye nada" };
+  return { tone: "ok", text: "Grabando tu voz" };
+}
