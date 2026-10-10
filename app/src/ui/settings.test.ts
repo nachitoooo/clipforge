@@ -385,6 +385,67 @@ describe("the save-clip shortcut", () => {
     expect(saveButton().textContent).toBe("Presioná la combinación…"); // still recording
   });
 
+  it("accepts a single key that types nothing, like F9", async () => {
+    await mount();
+    saveButton().click();
+    keydown({ code: "F9", key: "F9" });
+    await settle();
+    expect(lastSaved().shortcuts.saveClip).toBe("F9");
+    expect(saveButton().textContent).toBe("F9");
+    expect(resetButton().hidden).toBe(false);
+  });
+
+  it("accepts the other keys that don't write, with their Spanish names", async () => {
+    await mount();
+    for (const [code, saved, shown] of [
+      ["Insert", "Insert", "Insert"],
+      ["Home", "Home", "Inicio"],
+      ["PageUp", "PageUp", "RePág"],
+      ["Pause", "Pause", "Pausa"],
+    ]) {
+      saveButton().click();
+      keydown({ code, key: code });
+      await settle();
+      expect(lastSaved().shortcuts.saveClip).toBe(saved);
+      expect(saveButton().textContent).toBe(shown);
+    }
+  });
+
+  it("refuses a letter on its own and says what to do", async () => {
+    await mount();
+    saveButton().click();
+    keydown({ code: "KeyK", key: "k" });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(note().textContent).toContain("Sola, esa tecla dejaría de funcionar");
+    expect(note().textContent).toContain("F1–F24");
+    expect(saveButton().textContent).toBe("Presioná la combinación…"); // keeps listening
+    // ...and the same letter with a modifier is fine.
+    keydown({ code: "KeyK", key: "k", metaKey: true });
+    await settle();
+    expect(lastSaved().shortcuts.saveClip).toBe("CommandOrControl+K");
+  });
+
+  it("explains the rule in the panel", async () => {
+    await mount();
+    const text = q('[aria-labelledby="shortcuts-title"] .panel-intro').textContent!;
+    expect(text).toContain("tecla sola");
+    expect(text).toContain("⌘, ⌃ o ⌥");
+  });
+
+  it("the mute shortcut can be a single key too, but not the save shortcut's", async () => {
+    await mount(withSave("F9", { enabled: true }));
+    muteButton().click();
+    keydown({ code: "F9", key: "F9" });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(q('[data-shortcut-note="mute-mic"]').textContent).toContain("Guardar clip");
+    keydown({ code: "F10", key: "F10" });
+    await settle();
+    expect(lastSaved().microphone.muteShortcut).toBe("F10");
+    expect(muteButton().textContent).toBe("F10");
+  });
+
   it("the mute shortcut refuses whatever the save shortcut was changed to", async () => {
     await mount(withSave("Alt+F9", { enabled: true }));
     muteButton().click();

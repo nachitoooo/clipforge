@@ -5,6 +5,7 @@ import {
   normalizeAccelerator,
   ownerOf,
   sameAccelerator,
+  worksAlone,
   type KeyEventLike,
 } from "./hotkey";
 
@@ -80,14 +81,131 @@ describe("captureAccelerator", () => {
     expect(captureAccelerator(press("Escape", { metaKey: true }), true).kind).toBe("invalid");
   });
 
-  it("refuses a bare key or Shift alone (it would hijack normal typing)", () => {
-    expect(captureAccelerator(press("KeyM"), true).kind).toBe("invalid");
-    expect(captureAccelerator(press("KeyM", { shiftKey: true }), false).kind).toBe("invalid");
+  it("refuses keys it can't express", () => {
+    for (const code of ["Quote", "ContextMenu", "CapsLock", "IntlBackslash", "AudioVolumeUp", "Unidentified"]) {
+      const result = captureAccelerator(press(code, { altKey: true }), false);
+      expect(result.kind, code).toBe("invalid");
+    }
   });
 
-  it("refuses keys it can't express", () => {
-    expect(captureAccelerator(press("BracketLeft", { altKey: true }), false).kind).toBe("invalid");
-    expect(captureAccelerator(press("Enter", { ctrlKey: true }), false).kind).toBe("invalid");
+  it("accepts punctuation, editing keys and the numpad with a modifier", () => {
+    for (const code of [
+      "Enter",
+      "Tab",
+      "Backspace",
+      "Delete",
+      "Backquote",
+      "Minus",
+      "Equal",
+      "BracketLeft",
+      "BracketRight",
+      "Backslash",
+      "Semicolon",
+      "Comma",
+      "Period",
+      "Slash",
+      "Numpad0",
+      "Numpad9",
+      "NumpadAdd",
+      "NumpadSubtract",
+      "NumpadMultiply",
+      "NumpadDivide",
+      "NumpadDecimal",
+      "NumpadEnter",
+      "NumpadEqual",
+    ]) {
+      expect(captureAccelerator(press(code, { ctrlKey: true }), false), code).toEqual({
+        kind: "accelerator",
+        accelerator: `CommandOrControl+${code}`,
+      });
+    }
+  });
+});
+
+describe("a single key as a shortcut", () => {
+  const alone = [
+    ...Array.from({ length: 24 }, (_, i) => `F${i + 1}`),
+    "Insert",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "Pause",
+    "ScrollLock",
+    "PrintScreen",
+  ];
+
+  it("works for function keys and keys that type nothing", () => {
+    for (const code of alone) {
+      expect(captureAccelerator(press(code), true), code).toEqual({
+        kind: "accelerator",
+        accelerator: code,
+      });
+      expect(captureAccelerator(press(code), false), code).toEqual({
+        kind: "accelerator",
+        accelerator: code,
+      });
+      expect(worksAlone(code), code).toBe(true);
+    }
+  });
+
+  it("can still carry modifiers", () => {
+    expect(captureAccelerator(press("F9", { shiftKey: true }), true)).toEqual({
+      kind: "accelerator",
+      accelerator: "Shift+F9",
+    });
+    expect(captureAccelerator(press("F9", { metaKey: true }), true)).toEqual({
+      kind: "accelerator",
+      accelerator: "CommandOrControl+F9",
+    });
+    expect(captureAccelerator(press("Home", { ctrlKey: true, altKey: true }), false)).toEqual({
+      kind: "accelerator",
+      accelerator: "CommandOrControl+Alt+Home",
+    });
+  });
+
+  it("is refused for keys used to write or move around, with the reason", () => {
+    for (const code of [
+      "KeyM",
+      "Digit5",
+      "Space",
+      "Enter",
+      "Tab",
+      "Backspace",
+      "Delete",
+      "ArrowUp",
+      "ArrowLeft",
+      "Numpad0",
+      "NumpadAdd",
+      "Comma",
+      "Slash",
+    ]) {
+      const result = captureAccelerator(press(code), true);
+      expect(result.kind, code).toBe("invalid");
+      if (result.kind === "invalid") {
+        expect(result.reason).toContain("Sola");
+        expect(result.reason).toContain("Combiná");
+        expect(result.reason).toContain("F1–F24");
+      }
+      expect(worksAlone(code), code).toBe(false);
+    }
+  });
+
+  it("Shift alone does not make a typing key safe", () => {
+    expect(captureAccelerator(press("KeyM", { shiftKey: true }), false).kind).toBe("invalid");
+    expect(captureAccelerator(press("Space", { shiftKey: true }), false).kind).toBe("invalid");
+  });
+
+  it("the reason names the platform's modifiers", () => {
+    const mac = captureAccelerator(press("KeyM"), true);
+    const pc = captureAccelerator(press("KeyM"), false);
+    expect(mac.kind === "invalid" && mac.reason).toContain("⌘, ⌃ o ⌥");
+    expect(pc.kind === "invalid" && pc.reason).toContain("Ctrl, Alt o Win");
+  });
+
+  it("Escape is never a shortcut: it cancels the recording", () => {
+    expect(captureAccelerator(press("Escape"), true)).toEqual({ kind: "cancel" });
+    expect(worksAlone("Escape")).toBe(false);
   });
 });
 
@@ -117,6 +235,27 @@ describe("displayAccelerator", () => {
   it("uses names elsewhere", () => {
     expect(displayAccelerator("CommandOrControl+Shift+M", false)).toBe("Ctrl+Shift+M");
     expect(displayAccelerator("Super+K", false)).toBe("Win+K");
+  });
+
+  it("prints single keys as they are", () => {
+    expect(displayAccelerator("F9", true)).toBe("F9");
+    expect(displayAccelerator("F9", false)).toBe("F9");
+    expect(displayAccelerator("Shift+F9", true)).toBe("⇧F9");
+    expect(displayAccelerator("Shift+F9", false)).toBe("Shift+F9");
+  });
+
+  it("names the other keys in Spanish", () => {
+    expect(displayAccelerator("Home", false)).toBe("Inicio");
+    expect(displayAccelerator("End", false)).toBe("Fin");
+    expect(displayAccelerator("PageUp", false)).toBe("RePág");
+    expect(displayAccelerator("PageDown", false)).toBe("AvPág");
+    expect(displayAccelerator("Pause", false)).toBe("Pausa");
+    expect(displayAccelerator("PrintScreen", false)).toBe("ImprPant");
+    expect(displayAccelerator("Insert", false)).toBe("Insert");
+    expect(displayAccelerator("Control+Numpad0", true)).toBe("⌃Núm 0");
+    expect(displayAccelerator("CommandOrControl+NumpadAdd", false)).toBe("Ctrl+Núm +");
+    expect(displayAccelerator("Alt+Backspace", false)).toBe("Alt+Retroceso");
+    expect(displayAccelerator("Control+Slash", false)).toBe("Ctrl+/");
   });
 
   it("prints arrows and space readably", () => {

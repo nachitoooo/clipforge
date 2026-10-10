@@ -160,7 +160,9 @@ export function createSettings(root: HTMLElement): SettingsView {
     h(
       "p",
       { class: "panel-intro muted" },
-      "Funcionan desde cualquier aplicación o juego, aunque ClipForge esté en segundo plano.",
+      "Funcionan desde cualquier aplicación o juego, aunque ClipForge esté en segundo plano. Podés usar una tecla sola si es de función (F1–F24) o una que no escribe (Insert, Inicio, Fin, RePág, AvPág, Pausa, ImprPant); las demás necesitan ",
+      isMac ? "⌘, ⌃ o ⌥" : "Ctrl, Alt o Win",
+      ".",
     ),
     h(
       "div",

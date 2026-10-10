@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri_plugin_global_shortcut::Shortcut;
+use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 
 pub const SETTINGS_VERSION: u32 = 1;
 /// Microphone gain bounds, in percent (100 = unchanged, 200 = +6 dB).
@@ -97,9 +97,63 @@ impl Default for Settings {
     }
 }
 
+/// Keys that may be a shortcut on their own. None of them types a character
+/// or edits text, so claiming one system-wide costs nothing anyone writes
+/// with. Every other key needs Ctrl, Alt or ⌘ — alone, a letter would stop
+/// working in every other application (and in ClipForge's own text boxes).
+fn works_alone(key: Code) -> bool {
+    use Code::*;
+    matches!(
+        key,
+        F1 | F2
+            | F3
+            | F4
+            | F5
+            | F6
+            | F7
+            | F8
+            | F9
+            | F10
+            | F11
+            | F12
+            | F13
+            | F14
+            | F15
+            | F16
+            | F17
+            | F18
+            | F19
+            | F20
+            | F21
+            | F22
+            | F23
+            | F24
+            | Insert
+            | Home
+            | End
+            | PageUp
+            | PageDown
+            | Pause
+            | ScrollLock
+            | PrintScreen
+    )
+}
+
+/// An accelerator that parses and is safe to register globally: a key that
+/// works alone, or any key together with Ctrl, Alt or ⌘ (Shift alone doesn't
+/// count: Shift+S still types a capital S).
 fn parse_shortcut(accelerator: &str) -> Result<Shortcut, String> {
-    Shortcut::from_str(accelerator.trim())
-        .map_err(|_| format!("atajo no válido: «{}»", accelerator.trim()))
+    let text = accelerator.trim();
+    let shortcut = Shortcut::from_str(text).map_err(|_| format!("atajo no válido: «{text}»"))?;
+    let modified = shortcut
+        .mods
+        .intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER);
+    if !modified && !works_alone(shortcut.key) {
+        return Err(format!(
+            "el atajo «{text}» es una tecla para escribir o moverse: sola dejaría de funcionar en las demás aplicaciones. Combinala con Ctrl, Alt o ⌘, o usá una tecla de función (F1–F24), Insert, Inicio, Fin, RePág, AvPág, Pausa o ImprPant"
+        ));
+    }
+    Ok(shortcut)
 }
 
 impl Settings {
@@ -371,6 +425,99 @@ mod tests {
         }
     }
 
+    fn with_save(accelerator: &str) -> Settings {
+        let mut s = Settings::default();
+        s.shortcuts.save_clip = accelerator.into();
+        s
+    }
+
+    #[test]
+    fn keys_that_do_not_type_anything_work_on_their_own() {
+        for key in [
+            "F1",
+            "F9",
+            "F12",
+            "F13",
+            "F24",
+            "Insert",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "Pause",
+            "PrintScreen",
+            "ScrollLock",
+            "Shift+F9",
+        ] {
+            let v = with_save(key)
+                .validated()
+                .unwrap_or_else(|e| panic!("{key} should work alone: {e}"));
+            assert_eq!(v.shortcuts.save_clip, key);
+            // The mute shortcut follows the same rule.
+            let mut s = Settings::default();
+            s.microphone.mute_shortcut = key.into();
+            assert!(s.validated().is_ok(), "{key} as the mute shortcut");
+        }
+    }
+
+    #[test]
+    fn keys_used_for_writing_need_a_real_modifier() {
+        for key in [
+            "S",
+            "1",
+            "Space",
+            "Enter",
+            "Tab",
+            "Backspace",
+            "Delete",
+            "ArrowUp",
+            "ArrowLeft",
+            "Numpad0",
+            "NumpadAdd",
+            "NumpadEnter",
+            "Escape",
+            ".",
+            "-",
+            "Shift+S",
+            "Shift+Space",
+            "Shift+ArrowDown",
+        ] {
+            let err = with_save(key).validated().unwrap_err();
+            assert!(err.contains("sola dejaría de funcionar"), "{key}: {err}");
+            assert!(err.contains(key), "the message names the shortcut: {err}");
+        }
+    }
+
+    #[test]
+    fn the_same_keys_are_fine_with_ctrl_alt_or_command() {
+        for key in [
+            "Control+S",
+            "Alt+Space",
+            "Super+Enter",
+            "CommandOrControl+Numpad0",
+            "Control+Alt+ArrowUp",
+            "Alt+Shift+S",
+            "CommandOrControl+Backspace",
+        ] {
+            assert!(with_save(key).validated().is_ok(), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_hand_edited_file_with_a_typing_key_alone_is_repaired() {
+        let dir = TempDir::new("bare-letter");
+        fs::write(dir.file(), r#"{"shortcuts":{"saveClip":"S"}}"#).unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.save_clip, DEFAULT_SAVE_SHORTCUT);
+
+        // ...while a function key alone is kept.
+        fs::write(dir.file(), r#"{"shortcuts":{"saveClip":"F9"}}"#).unwrap();
+        assert_eq!(
+            SettingsStore::load(dir.file()).get().shortcuts.save_clip,
+            "F9"
+        );
+    }
+
     #[test]
     fn the_two_shortcuts_cannot_be_the_same_however_they_are_spelled() {
         let mut s = Settings::default();
@@ -472,6 +619,40 @@ mod tests {
             "Alt+ArrowRight",
             "Alt+F24",
             "CommandOrControl+Z",
+            "Alt+F1",
+            "F9",
+            "Shift+F9",
+            "Insert",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "Pause",
+            "PrintScreen",
+            "ScrollLock",
+            "Control+Enter",
+            "Control+Tab",
+            "Control+Backspace",
+            "Control+Delete",
+            "Control+Backquote",
+            "Control+Minus",
+            "Control+Equal",
+            "Control+BracketLeft",
+            "Control+BracketRight",
+            "Control+Backslash",
+            "Control+Semicolon",
+            "Control+Comma",
+            "Control+Period",
+            "Control+Slash",
+            "Control+Numpad0",
+            "Control+Numpad9",
+            "Control+NumpadAdd",
+            "Control+NumpadSubtract",
+            "Control+NumpadMultiply",
+            "Control+NumpadDivide",
+            "Control+NumpadDecimal",
+            "Control+NumpadEnter",
+            "Control+NumpadEqual",
         ] {
             let mut s = Settings::default();
             s.microphone.mute_shortcut = accelerator.to_string();

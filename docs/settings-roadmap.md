@@ -7,7 +7,7 @@ surprises, and the settings planned next (in the order we would build them).
 
 | Setting | Where it lives | Applied |
 |---|---|---|
-| Save-clip shortcut | `settings.shortcuts.saveClip` (default `CommandOrControl+Shift+S`) | live: the OS registration moves, all or nothing (`shortcuts.rs`); the tray hint and the gallery button follow |
+| Save-clip shortcut | `settings.shortcuts.saveClip` (default `CommandOrControl+Shift+S`; may be a single F-key, see below) | live: the OS registration moves, all or nothing (`shortcuts.rs`); the tray hint and the gallery button follow |
 | Microphone on/off | `settings.microphone.enabled` | live: only the microphone stream starts/stops |
 | Microphone device | `settings.microphone.deviceId` (`null` = system default) | live: restarts only the microphone stream |
 | Microphone mode (mixed / separate track) | `settings.microphone.mode` | live: restarts only the microphone stream |
@@ -42,6 +42,15 @@ app from starting when another application owns the keys (the user gets a
 notification instead). To add one: a field in `ShortcutSettings`, an entry in
 `shortcuts::wanted`, a `ShortcutAction`, and a `createShortcutRecorder` row in
 the UI that lists the other shortcuts in its `conflict` callback.
+
+A shortcut may be a single key only if the key types nothing (F1–F24, Insert,
+Home, End, PageUp, PageDown, Pause, PrintScreen, ScrollLock): registered
+globally, a letter or Space would stop working in every other application and
+in ClipForge's own text boxes. Everything else needs Ctrl, Alt or ⌘ (Shift
+alone doesn't count). The rule lives in `works_alone` (`settings.rs`, enforced
+for every shortcut in `Settings::validated`) and mirrors `worksAlone` in
+`app/src/lib/hotkey.ts`; change both together. Pause and ScrollLock have no
+scancode on macOS, so the OS refuses them there and the user sees why.
 
 Rules we keep: the microphone (and any new input) is opt-in; a failing audio
 path never stops the video; secrets and paths never go to the webview unless

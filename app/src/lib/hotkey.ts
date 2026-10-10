@@ -37,6 +37,21 @@ const MODIFIER_CODES = new Set([
   "OS",
 ]);
 
+/**
+ * Keys that may be a shortcut on their own: none of them types a character or
+ * edits text, so claiming one system-wide costs nothing anyone writes with.
+ * Mirrors `works_alone` in `settings.rs`; every other key needs a modifier.
+ */
+const WORKS_ALONE = /^(F([1-9]|1\d|2[0-4])|Insert|Home|End|PageUp|PageDown|Pause|ScrollLock|PrintScreen)$/;
+
+export function worksAlone(keyToken: string): boolean {
+  return WORKS_ALONE.test(keyToken);
+}
+
+/** Named keys the plugin's parser understands, besides letters, digits and F-keys. */
+const NAMED_KEYS =
+  /^(Space|Enter|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Pause|ScrollLock|PrintScreen|Backquote|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Comma|Period|Slash|Arrow(Up|Down|Left|Right)|Numpad(\d|Add|Subtract|Multiply|Divide|Decimal|Enter|Equal))$/;
+
 /** The key part of the accelerator for a physical key, or `null` if unusable. */
 function keyToken(code: string): string | null {
   const letter = /^Key([A-Z])$/.exec(code);
@@ -44,8 +59,7 @@ function keyToken(code: string): string | null {
   const digit = /^Digit(\d)$/.exec(code);
   if (digit) return digit[1];
   if (/^F([1-9]|1\d|2[0-4])$/.test(code)) return code;
-  if (code === "Space") return "Space";
-  if (/^Arrow(Up|Down|Left|Right)$/.test(code)) return code;
+  if (NAMED_KEYS.test(code)) return code;
   return null;
 }
 
@@ -70,10 +84,10 @@ export function captureAccelerator(e: KeyEventLike, isMac: boolean): CaptureResu
   }
   if (e.altKey) modifiers.push("Alt");
 
-  if (modifiers.length === 0) {
+  if (modifiers.length === 0 && !worksAlone(key)) {
     return {
       kind: "invalid",
-      reason: `Combiná la tecla con ${isMac ? "⌘, ⌃ o ⌥" : "Ctrl, Alt o Win"}`,
+      reason: `Sola, esa tecla dejaría de funcionar en las demás aplicaciones. Combiná la tecla con ${isMac ? "⌘, ⌃ o ⌥" : "Ctrl, Alt o Win"}, o usá una de función (F1–F24), Insert, Inicio, Fin, RePág, AvPág, Pausa o ImprPant`,
     };
   }
   if (e.shiftKey) modifiers.push("Shift");
@@ -136,13 +150,48 @@ const KEY_NAMES: Record<string, string> = {
   ARROWLEFT: "←",
   ARROWRIGHT: "→",
   SPACE: "Espacio",
+  BACKSPACE: "Retroceso",
+  DELETE: "Supr",
+  INSERT: "Insert",
+  HOME: "Inicio",
+  END: "Fin",
+  PAGEUP: "RePág",
+  PAGEDOWN: "AvPág",
+  PAUSE: "Pausa",
+  PRINTSCREEN: "ImprPant",
+  SCROLLLOCK: "BloqDesp",
+  ENTER: "Enter",
+  TAB: "Tab",
+  BACKQUOTE: "`",
+  MINUS: "-",
+  EQUAL: "=",
+  BRACKETLEFT: "[",
+  BRACKETRIGHT: "]",
+  BACKSLASH: "\\",
+  SEMICOLON: ";",
+  COMMA: ",",
+  PERIOD: ".",
+  SLASH: "/",
+  NUMPADADD: "Núm +",
+  NUMPADSUBTRACT: "Núm -",
+  NUMPADMULTIPLY: "Núm *",
+  NUMPADDIVIDE: "Núm /",
+  NUMPADDECIMAL: "Núm .",
+  NUMPADENTER: "Núm Enter",
+  NUMPADEQUAL: "Núm =",
 };
+
+/** What a key is called on the button: `K`, `F9`, `Inicio`, `Núm 0`. */
+function keyName(key: string): string {
+  const numpadDigit = /^NUMPAD(\d)$/.exec(key);
+  return numpadDigit ? `Núm ${numpadDigit[1]}` : (KEY_NAMES[key] ?? key);
+}
 
 /** `⌘⇧M` on a Mac, `Ctrl+Shift+M` elsewhere. */
 export function displayAccelerator(accelerator: string, isMac: boolean): string {
   const normalized = normalizeAccelerator(accelerator).split("+");
   const key = normalized.pop() ?? "";
-  const shownKey = KEY_NAMES[key] ?? key;
+  const shownKey = keyName(key);
   if (isMac) {
     const order = ["control", "alt", "shift", "command", "commandorcontrol", "super"];
     const glyphs = normalized
