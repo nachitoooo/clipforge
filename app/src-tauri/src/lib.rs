@@ -1,9 +1,11 @@
 mod dispatch;
 mod library;
 mod recorder;
+mod settings;
 
 use dispatch::{dispatch, Actions, Command};
 use recorder::{BufferStatus, Recorder, DEFAULT_CLIP_SECONDS};
+use settings::{Settings, SettingsStore};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
@@ -18,6 +20,11 @@ fn save_clip_shortcut() -> Shortcut {
     #[cfg(not(target_os = "macos"))]
     let modifiers = Modifiers::CONTROL | Modifiers::SHIFT;
     Shortcut::new(Some(modifiers), Code::KeyS)
+}
+
+/// Shortcuts owned by other features: a user-chosen one must not collide.
+fn reserved_shortcuts() -> Vec<Shortcut> {
+    vec![save_clip_shortcut()]
 }
 
 /// The real [`Actions`] implementation: routes dispatcher decisions to the
@@ -155,6 +162,23 @@ fn reveal_clip(
         .map_err(|e| format!("no se pudo abrir la carpeta: {e}"))
 }
 
+#[tauri::command]
+fn get_settings(store: tauri::State<'_, SettingsStore>) -> Settings {
+    store.get()
+}
+
+#[tauri::command]
+fn update_settings(
+    app: AppHandle,
+    store: tauri::State<'_, SettingsStore>,
+    settings: Settings,
+) -> Result<Settings, String> {
+    let validated = settings.validated(&reserved_shortcuts())?;
+    let saved = store.replace(validated)?;
+    app.emit("settings-changed", &saved).ok();
+    Ok(saved)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -178,7 +202,9 @@ pub fn run() {
             list_clips,
             rename_clip,
             delete_clip,
-            reveal_clip
+            reveal_clip,
+            get_settings,
+            update_settings
         ])
         .setup(|app| {
             // Clips folder: ~/Movies/ClipForge (or the OS video dir).
@@ -187,6 +213,9 @@ pub fn run() {
                 .video_dir()
                 .unwrap_or_else(|_| std::env::temp_dir())
                 .join("ClipForge");
+            app.manage(SettingsStore::load(
+                app.path().app_config_dir()?.join("settings.json"),
+            ));
             app.manage(Recorder::new(clips_dir));
 
             // Tray menu (menu-bar icon on macOS).
