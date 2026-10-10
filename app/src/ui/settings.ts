@@ -23,6 +23,7 @@ import {
 } from "../lib/settings";
 import { h, svg } from "./dom";
 import { icons } from "./icons";
+import { switchControl } from "./switch";
 import { toast } from "./toast";
 
 export interface SettingsView {
@@ -47,18 +48,6 @@ function row(label: string, hint: string | null, control: HTMLElement): HTMLElem
     ),
     control,
   );
-}
-
-function switchControl(label: string, onChange: (checked: boolean) => void) {
-  const input = h("input", {
-    type: "checkbox",
-    role: "switch",
-    class: "switch-input",
-    "aria-label": label,
-  });
-  input.addEventListener("change", () => onChange(input.checked));
-  const el = h("label", { class: "switch" }, input, h("span", { class: "switch-track" }));
-  return { el, input };
 }
 
 export function createSettings(root: HTMLElement): SettingsView {

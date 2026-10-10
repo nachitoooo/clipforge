@@ -23,7 +23,8 @@ hotkey saves the last N seconds as a clip.
 - Ring buffer, clip extraction, and trimming logic must have property-style
   tests around boundaries (wraparound, exact-duration clips, empty buffer).
 - UI E2E: `tauri-driver` + WebdriverIO once the UI stabilizes (Milestone 3);
-  until then, keep UI logic in testable TypeScript modules.
+  until then, keep UI logic in testable TypeScript modules (`app/src/lib/*`,
+  plus simulated-DOM view tests with `happy-dom`).
 - Platform-specific capture code (`core/src/capture/{windows,macos}`) is
   exercised by ignored integration tests (`cargo test -- --ignored`) that run
   only on the matching OS in CI.
@@ -57,7 +58,11 @@ hotkey saves the last N seconds as a clip.
   - Windows: WASAPI loopback → Media Foundation AAC encoder
   - Packets are AAC and live in the ring buffer next to the video; the muxer
     aligns them with an `elst` edit list (`clip/edit_list.rs`).
-- **Remux/trim:** `ffmpeg` sidecar binary (never for encoding — only stream copy).
+- **Remux/trim/edit:** in-process Rust (`core/src/clip/trim.rs` + our own
+  muxer) — no ffmpeg. Cuts are stream copies: the copy starts at the keyframe
+  before the requested start and a video edit list hides the extra frames, so
+  the start is frame accurate. Never re-encode; audio waveforms are decoded in
+  Rust (`symphonia`).
 - **UI:** Tauri 2 + TypeScript (clips gallery, trim editor, settings, hotkeys).
 - **Global hotkeys:** `global-hotkey` crate.
 - **CI:** GitHub Actions matrix (`windows-latest`, `macos-latest`).
@@ -71,7 +76,7 @@ core/                  # clipforge-core crate
     audio/             # AudioEncoder trait, ContinuityGuard, AAC encoders, WASAPI
     encode/            # Encoder trait + videotoolbox.rs, mediafoundation.rs
     buffer/            # encoded-frame ring buffer (GOP-aligned eviction) + AAC lane
-    clip/              # extract last-N-seconds, remux to mp4 (+audio track), trim
+    clip/              # extract last-N-seconds, remux to mp4 (+audio tracks), trim/probe/waveform (trim.rs)
   tests/               # integration tests with TestPatternSource
 app/                   # Tauri 2 app (src-tauri/ + src/ TypeScript UI)
 milestones/            # feature tracking (see Milestone Tracking)

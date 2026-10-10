@@ -6,6 +6,7 @@ import { formatBytes, formatDuration, formatRelativeTime } from "../lib/format";
 import { confirmDialog } from "./modal";
 import { h, svg } from "./dom";
 import { icons } from "./icons";
+import { openEditor } from "./editor";
 import { openPlayer } from "./player";
 import { toast } from "./toast";
 
@@ -138,6 +139,7 @@ export function createGallery(root: HTMLElement): Gallery {
         h(
           "div",
           { class: "card-actions" },
+          actionButton("Recortar y editar", icons.cut, () => openEditor(clip)),
           actionButton("Renombrar", icons.rename, () => startRename(title, clip)),
           actionButton("Mostrar en carpeta", icons.folder, () => void run(() => api.revealClip(clip.name))),
           actionButton("Borrar", icons.trash, () => void remove(clip), true),

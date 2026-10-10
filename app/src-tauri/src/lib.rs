@@ -1,4 +1,5 @@
 mod dispatch;
+mod editor;
 mod library;
 mod mic;
 mod recorder;
@@ -210,6 +211,43 @@ fn reveal_clip(
         .map_err(|e| format!("no se pudo abrir la carpeta: {e}"))
 }
 
+/// Run blocking clip work (reading and writing files) off the UI thread.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn describe_clip(app: AppHandle, name: String) -> Result<editor::EditorClip, String> {
+    let dir = app.state::<Recorder>().clips_dir();
+    blocking(move || editor::describe(&dir, &name)).await
+}
+
+#[tauri::command]
+async fn clip_waveform(
+    app: AppHandle,
+    name: String,
+    track: usize,
+) -> Result<editor::Waveform, String> {
+    let dir = app.state::<Recorder>().clips_dir();
+    blocking(move || editor::waveform(&dir, &name, track)).await
+}
+
+#[tauri::command]
+async fn trim_clip(
+    app: AppHandle,
+    request: editor::TrimRequest,
+) -> Result<editor::TrimResult, String> {
+    let dir = app.state::<Recorder>().clips_dir();
+    let result = blocking(move || editor::trim_clip(&dir, &request)).await?;
+    // The gallery refreshes itself and highlights the new clip.
+    app.emit("clip-saved", &result.name).ok();
+    Ok(result)
+}
+
 #[tauri::command]
 fn get_settings(store: tauri::State<'_, Arc<SettingsStore>>) -> Settings {
     store.get()
@@ -317,6 +355,9 @@ pub fn run() {
             rename_clip,
             delete_clip,
             reveal_clip,
+            describe_clip,
+            clip_waveform,
+            trim_clip,
             get_settings,
             update_settings,
             list_microphones,

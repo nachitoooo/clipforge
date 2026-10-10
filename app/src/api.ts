@@ -5,7 +5,9 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { BufferStatus } from "./lib/buffer";
 import type { ClipInfo } from "./lib/clips";
+import type { EditorClip, TrimRequest, TrimResult } from "./lib/editor";
 import type { MicDevice, MicStatus, Settings } from "./lib/settings";
+import type { Waveform } from "./lib/waveform";
 
 export const listClips = () => invoke<ClipInfo[]>("list_clips");
 export const renameClip = (name: string, newName: string) =>
@@ -13,6 +15,12 @@ export const renameClip = (name: string, newName: string) =>
 export const deleteClip = (name: string) => invoke<void>("delete_clip", { name });
 export const revealClip = (name: string) => invoke<void>("reveal_clip", { name });
 export const openClipsFolder = () => invoke<void>("open_clips_folder");
+
+// Clip editor (src-tauri/src/editor.rs)
+export const describeClip = (name: string) => invoke<EditorClip>("describe_clip", { name });
+export const clipWaveform = (name: string, track: number) =>
+  invoke<Waveform>("clip_waveform", { name, track });
+export const trimClip = (request: TrimRequest) => invoke<TrimResult>("trim_clip", { request });
 
 export const bufferStatus = () => invoke<BufferStatus>("buffer_status");
 export const toggleBuffer = () => invoke<void>("toggle_buffer");

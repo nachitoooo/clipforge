@@ -13,10 +13,20 @@ app settings.
 - [ ] Delete / reveal-in-folder / rename actions
 - [ ] Gallery updates live when a new clip is saved
 
-## F-3.2 — Trim editor
-- [ ] Timeline with in/out handles over the clip preview
-- [ ] Export trimmed clip (ffmpeg stream copy, keyframe-snapped)
-- [ ] Original clip preserved; trimmed copy saved alongside
+## F-3.2 — Clip editor (trim + audio lanes)
+> **Progress (2026-10-09, branch `feat/3/clip-editor`):** implemented. The cut
+> is done in-process by our own muxer (`core/src/clip/trim.rs`, see
+> [`docs/clip-editor.md`](../docs/clip-editor.md)) — no ffmpeg sidecar. The UI
+> boxes stay open until someone checks them in the running Tauri window: they
+> are covered by simulated-DOM tests and were driven in headless Chrome against
+> a mock backend, never in the real webview.
+- [ ] Timeline with in/out handles over the clip preview (drag, arrow keys, I/O keys, typed times, play the selection, loop)
+- [x] Export the trimmed clip as a stream copy with a **frame-accurate** start (a video edit list hides the frames before the requested start; no re-encode)
+  — verified 2026-10-09 with ffprobe/ffmpeg and with AVFoundation (QuickTime/Safari's engine): exact duration, frame count and first frame; audio tones land where the cut says, including after a second cut
+- [x] Original clip preserved; trimmed copy saved alongside as `<name>-recorte.mp4` (never overwrites: `-recorte-2`, ...)
+- [ ] When the clip has sound, one lane per audio track under the video lane, with its waveform; each track can be left out of the copy (a silent clip shows no audio lanes)
+  — waveform decoded in Rust (symphonia); the real pipeline's two-track clips (real AAC, voice starting late) cut correctly, checked with AVFoundation
+- [ ] Manual check in the app: open a clip from the gallery (scissors on the card, or "Recortar" in the player), cut it, play the copy in QuickTime; try a clip with a separate microphone track
 
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented

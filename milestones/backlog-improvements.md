@@ -57,3 +57,22 @@ they come up (see CLAUDE.md → Improvement Backlog).
   cap for sharing (Discord limits) needs re-encoding, which `CLAUDE.md` forbids
   for ffmpeg, so it needs an explicit exception first.
 - **Added:** 2026-10-09
+
+## Clip editor follow-ups
+- **Related to:** F-3.2
+- **Why:** the first editor cuts and drops tracks; these are what people will
+  ask for next.
+- **Details:**
+  * Timeline zoom (a 2-minute clip gives ~9 px per second; fine cuts rely on
+    the keyboard and the time boxes today).
+  * Per-track volume and fades: needs decoding and re-encoding the AAC, which
+    breaks the "never re-encode" rule — decide the exception first (same
+    question as the size cap for sharing in "More settings ideas").
+  * Name the tracks inside the file so the editor can label them exactly
+    (today: first = Juego, second = Micrófono, by convention).
+  * Preview every track (the webview plays only the first): decode to Web
+    Audio, or expose `audioTracks` where the engine supports it.
+  * Split one clip into several, join clips, "replace the original" after a cut.
+  * Undo/redo and a draggable selection body (slide the whole cut).
+- **Added:** 2026-10-09
+

@@ -925,3 +925,404 @@ kbd {
     max-width: none;
   }
 }
+
+/* ---- clip editor ------------------------------------------------------- */
+
+.editor {
+  --tl-label: 150px;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 20px 16px;
+  background: var(--bg);
+  outline: none;
+  overflow-y: auto;
+  animation: fade-in 0.14s ease-out;
+}
+
+.editor-loading {
+  padding: 40px 8px;
+}
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.editor-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.editor-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-title .muted {
+  font-size: 12px;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn:disabled:hover {
+  background: var(--bg-card);
+}
+
+.btn-primary:disabled:hover {
+  background: var(--accent);
+}
+
+.editor-stage {
+  flex: 1;
+  min-height: 90px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: #000;
+  overflow: hidden;
+}
+
+.editor-video {
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+}
+
+.editor-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn-round {
+  width: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-round:hover {
+  background: var(--accent-strong);
+}
+
+.icon-btn-flat {
+  background: transparent;
+}
+
+.icon-btn-flat:hover {
+  background: var(--bg-hover);
+}
+
+.editor-time {
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.btn-toggle {
+  color: var(--muted);
+}
+
+.btn-toggle.on {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.editor-timeline {
+  /* room on the right so the end handle isn't clipped at the very end */
+  padding: 6px 10px 2px 0;
+}
+
+.timeline {
+  position: relative;
+  user-select: none;
+}
+
+.tl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tl-row {
+  display: grid;
+  grid-template-columns: var(--tl-label) 1fr;
+  align-items: stretch;
+  min-height: 24px;
+}
+
+.tl-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--muted);
+}
+
+.tl-label-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.icon-sm {
+  width: 16px;
+  height: 16px;
+}
+
+.tl-ruler {
+  position: relative;
+  height: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tl-tick {
+  position: absolute;
+  bottom: 2px;
+  padding-left: 4px;
+  border-left: 1px solid var(--muted);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tl-track {
+  position: relative;
+  border-radius: 8px;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.tl-video-track {
+  display: flex;
+  height: 58px;
+}
+
+.tl-tile {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.9;
+}
+
+.tl-audio-track {
+  height: 52px;
+}
+
+.tl-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.tl-wave path {
+  fill: #5aa7ff;
+}
+
+.tl-row-audio:nth-of-type(n + 4) .tl-wave path {
+  fill: #7be0a8;
+}
+
+.tl-off .tl-wave,
+.tl-off .tl-label-text {
+  opacity: 0.3;
+}
+
+.tl-off .tl-track {
+  background: repeating-linear-gradient(135deg, var(--bg-card) 0 8px, var(--bg) 8px 16px);
+}
+
+.tl-note {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* selection, handles and playhead sit over the track column only */
+.tl-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--tl-label);
+  right: 0;
+  cursor: text;
+  touch-action: none;
+}
+
+.tl-shade {
+  position: absolute;
+  top: 28px;
+  bottom: 0;
+  background: rgba(13, 14, 18, 0.62);
+  pointer-events: none;
+}
+
+.tl-shade-start {
+  left: 0;
+}
+
+.tl-shade-end {
+  right: 0;
+}
+
+.tl-handle {
+  position: absolute;
+  top: 28px;
+  bottom: 0;
+  width: 14px;
+  margin-left: -7px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.tl-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.tl-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 14px;
+  height: 26px;
+  margin-top: -13px;
+  border-radius: 5px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.tl-handle:focus-visible {
+  outline: none;
+}
+
+.tl-handle:focus-visible::after {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text);
+}
+
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid #fff;
+  pointer-events: none;
+}
+
+.tl-playhead-cap {
+  position: absolute;
+  top: 0;
+  left: -7px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px 3px 6px 6px;
+  background: #fff;
+}
+
+.editor-hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.tc-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.tc-input {
+  width: 92px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.editor-length {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .editor {
+    --tl-label: 112px;
+  }
+}
+
+@media (max-height: 640px) {
+  .tl-video-track {
+    height: 42px;
+  }
+
+  .tl-audio-track {
+    height: 38px;
+  }
+
+  .tl-shade,
+  .tl-handle {
+    top: 28px;
+  }
+
+  .editor-hint {
+    display: none;
+  }
+}
+
+.player-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
