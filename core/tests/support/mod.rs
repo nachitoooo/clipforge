@@ -36,6 +36,59 @@ pub fn avf_decoder() -> Option<&'static Path> {
     .as_deref()
 }
 
+/// What AVFoundation makes of the video track of `mp4`: the container
+/// duration and the frames it actually decodes (presentation order).
+#[derive(Debug, Clone, Copy)]
+pub struct VideoView {
+    pub duration: f64,
+    pub frames: usize,
+    pub first: f64,
+    pub last: f64,
+}
+
+/// Decode the video of `mp4` with AVFoundation; `None` without a Swift
+/// toolchain.
+pub fn avf_video(mp4: &Path) -> Option<VideoView> {
+    static BIN: OnceLock<Option<PathBuf>> = OnceLock::new();
+    let bin = BIN
+        .get_or_init(|| {
+            let dir = scratch();
+            let source = dir.join(format!("avf_video-{}.swift", std::process::id()));
+            let bin = dir.join(format!("avf_video-{}", std::process::id()));
+            std::fs::write(&source, include_str!("avf_video.swift")).ok()?;
+            let ok = Command::new("swiftc")
+                .arg("-O")
+                .arg(&source)
+                .arg("-o")
+                .arg(&bin)
+                .output()
+                .ok()?
+                .status
+                .success();
+            ok.then_some(bin)
+        })
+        .as_deref()?;
+    let output = Command::new(bin).arg(mp4).output().ok()?;
+    assert!(
+        output.status.success(),
+        "avf_video failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    let field = |name: &str| -> f64 {
+        text.split_whitespace()
+            .find_map(|part| part.strip_prefix(name)?.strip_prefix('='))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| panic!("no {name} in {text:?}"))
+    };
+    Some(VideoView {
+        duration: field("duration"),
+        frames: field("frames") as usize,
+        first: field("first"),
+        last: field("last"),
+    })
+}
+
 /// Left channel of audio track `track` (0 = first), on the clip's timeline.
 pub fn decode_track(mp4: &Path, track: usize) -> Option<Vec<f32>> {
     let decoder = avf_decoder()?;

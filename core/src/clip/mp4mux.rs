@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use super::edit_list::{add_audio_edit_lists, EditEntry};
+use super::edit_list::{add_edit_lists, ClipEdits, EditEntry};
 use crate::audio::{AudioConfig, AudioPacket};
 use crate::encode::{Codec, EncodedPacket, ParameterSets};
 
@@ -221,7 +221,27 @@ pub fn write_mp4_with_tracks(
     packets: &[EncodedPacket],
     audio: &[(&AudioParams, &[AudioPacket])],
 ) -> Result<Duration, MuxError> {
+    write_mp4_cut(path, params, parameter_sets, packets, 0, audio)
+}
+
+/// [`write_mp4_with_tracks`] for a clip cut out of another one.
+///
+/// A cut can only begin on a keyframe, so `packets` starts at the keyframe
+/// before the wanted start and the first `lead_in` packets are decode-only:
+/// they stay in the file but an edit list on the video track hides them, so
+/// playback begins at `packets[lead_in]` (a frame-accurate start without
+/// re-encoding). The audio is aligned to that visible start. Returns the
+/// duration that is played, lead-in excluded.
+pub fn write_mp4_cut(
+    path: &Path,
+    params: &VideoParams,
+    parameter_sets: &ParameterSets,
+    packets: &[EncodedPacket],
+    lead_in: usize,
+    audio: &[(&AudioParams, &[AudioPacket])],
+) -> Result<Duration, MuxError> {
     let first = packets.first().ok_or(MuxError::NoPackets)?;
+    let visible = packets.get(lead_in).ok_or(MuxError::NoPackets)?;
     // Validate every requested audio format up front, then decide which
     // tracks have something audible and how each is aligned.
     let mut tracks: Vec<AudioTrack<'_>> = Vec::new();
@@ -230,7 +250,7 @@ pub fn write_mp4_with_tracks(
             continue;
         }
         let conf = aac_config(audio_params)?;
-        if let Some(plan) = plan_audio(audio_packets, audio_params, first.pts) {
+        if let Some(plan) = plan_audio(audio_packets, audio_params, visible.pts) {
             tracks.push(AudioTrack {
                 params: audio_params,
                 packets: &audio_packets[plan.first..],
@@ -355,13 +375,26 @@ pub fn write_mp4_with_tracks(
     std::io::Write::flush(&mut file)?;
     drop(file);
 
-    let edits: Vec<Vec<EditEntry>> = tracks.iter().map(|t| t.edits.clone()).collect();
-    if edits.iter().any(|e| !e.is_empty()) {
-        add_audio_edit_lists(path, &edits)?;
+    let lead_in_ticks = to_ticks(visible.pts - base_pts);
+    let last = packets.last().expect("checked non-empty");
+    let end_ticks = to_ticks(last.pts - base_pts) + u64::from(frame_ticks);
+    let edits = ClipEdits {
+        video: if lead_in_ticks > 0 {
+            vec![EditEntry {
+                segment_duration: (end_ticks - lead_in_ticks) as u32,
+                media_time: lead_in_ticks as i32,
+            }]
+        } else {
+            Vec::new()
+        },
+        audio: tracks.iter().map(|t| t.edits.clone()).collect(),
+        movie_duration: (lead_in_ticks > 0).then(|| (end_ticks - lead_in_ticks) as u32),
+    };
+    if !edits.video.is_empty() || edits.audio.iter().any(|e| !e.is_empty()) {
+        add_edit_lists(path, &edits)?;
     }
 
-    let last = packets.last().expect("checked non-empty");
-    Ok(last.pts - base_pts + Duration::from_secs(1) / params.fps.max(1))
+    Ok(last.pts - visible.pts + Duration::from_secs(1) / params.fps.max(1))
 }
 
 /// One audio track about to be written.

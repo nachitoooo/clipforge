@@ -1,10 +1,11 @@
 //! Clip output: extract the last N seconds from the replay buffer and save
 //! them as an .mp4 ([`ClipService`]), muxing in-process ([`mp4mux`]) — a
-//! container write, never a re-encode. The ffmpeg sidecar remains reserved
-//! for stream-copy trimming of existing files (Milestone 3).
+//! container write, never a re-encode. [`trim`] edits saved clips the same
+//! way (cut, drop audio tracks, draw waveforms) without an ffmpeg sidecar.
 
 pub mod edit_list;
 pub mod mp4mux;
+pub mod trim;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
