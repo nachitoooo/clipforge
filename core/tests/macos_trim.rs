@@ -10,7 +10,8 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use clipforge_core::clip::trim::{trim_clip, TrimSpec};
+use clipforge_core::audio::MicMode;
+use clipforge_core::clip::trim::{probe, trim_clip, TrimSpec};
 
 const RATE: usize = 48_000;
 
@@ -19,20 +20,32 @@ fn fixture() -> PathBuf {
 }
 
 fn cut(name: &str, start: f64, end: f64) -> PathBuf {
+    cut_from(&fixture(), name, start, end, &[0])
+}
+
+fn cut_from(source: &Path, name: &str, start: f64, end: f64, keep_audio: &[usize]) -> PathBuf {
     let dir = std::env::temp_dir().join("clipforge-macos-trim");
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join(format!("{name}-{}.mp4", std::process::id()));
     trim_clip(
-        &fixture(),
+        source,
         &out,
         &TrimSpec {
             start: Duration::from_secs_f64(start),
             end: Duration::from_secs_f64(end),
-            keep_audio: vec![0],
+            keep_audio: keep_audio.to_vec(),
         },
     )
     .unwrap();
     out
+}
+
+/// Seconds until the track first carries a sound (10 ms windows).
+fn onset(pcm: &[f32]) -> f64 {
+    let window = RATE / 100;
+    pcm.chunks(window)
+        .position(|w| rms(w) > 0.05)
+        .map_or(f64::INFINITY, |i| (i * window) as f64 / RATE as f64)
 }
 
 fn rms(samples: &[f32]) -> f32 {
@@ -88,4 +101,69 @@ fn avfoundation_agrees_when_the_cut_starts_on_a_keyframe() {
     assert_eq!(view.frames, 60, "{view:?}");
     assert!(view.first.abs() < 0.001);
     std::fs::remove_file(&out).ok();
+}
+
+#[test]
+fn a_clip_from_the_real_pipeline_keeps_each_track_and_its_late_start() {
+    // Real AudioToolbox AAC, two tracks: the game tone (440 Hz) from the
+    // start, the voice (880 Hz) joining a moment later — so the voice track
+    // starts with silence, written as an empty edit. (The video is a mock
+    // encoder's, so only the audio is decoded here.)
+    let source = support::record_clip(MicMode::Separate, "trim-source", Duration::from_secs(4));
+    let (Some(game), Some(voice)) = (
+        support::decode_track(&source.path, 0),
+        support::decode_track(&source.path, 1),
+    ) else {
+        eprintln!("no Swift toolchain: skipping the AVFoundation checks");
+        return;
+    };
+    let voice_enters = onset(&voice);
+    eprintln!("the voice enters {voice_enters:.3} s into the source clip");
+    assert!(
+        voice_enters > 0.15,
+        "the test needs a late voice: {voice_enters}"
+    );
+    let game_enters = onset(&game);
+    eprintln!("the game enters {game_enters:.3} s into the source clip");
+
+    let start = 0.1;
+    let out = cut_from(&source.path, "real", start, 2.1, &[0, 1]);
+    let info = probe(&out).unwrap();
+    assert_eq!(info.audio.len(), 2);
+    assert!((info.duration.as_secs_f64() - 2.0).abs() < 0.05, "{info:?}");
+
+    let (Some(game_cut), Some(voice_cut)) = (
+        support::decode_track(&out, 0),
+        support::decode_track(&out, 1),
+    ) else {
+        return;
+    };
+    // The same sounds, `start` earlier.
+    let entering = onset(&voice_cut);
+    assert!(
+        (entering - (voice_enters - start)).abs() < 0.03,
+        "the voice enters at {entering:.3} s, expected {:.3} s",
+        voice_enters - start
+    );
+    let game_entering = onset(&game_cut);
+    assert!(
+        (game_entering - (game_enters - start).max(0.0)).abs() < 0.03,
+        "the game enters at {game_entering:.3} s, expected {:.3} s",
+        (game_enters - start).max(0.0)
+    );
+    let second = |pcm: &[f32]| pcm[RATE..RATE * 2].to_vec();
+    assert!(support::amplitude_at(&second(&game_cut), RATE as f32, 440.0) > 0.3);
+    assert!(support::amplitude_at(&second(&game_cut), RATE as f32, 880.0) < 0.05);
+    assert!(support::amplitude_at(&second(&voice_cut), RATE as f32, 880.0) > 0.3);
+    assert!(support::amplitude_at(&second(&voice_cut), RATE as f32, 440.0) < 0.05);
+    std::fs::remove_file(&out).ok();
+
+    // Dropping the game track leaves the voice as the only (default) track.
+    let voice_only = cut_from(&source.path, "voice-only", start, 2.1, &[1]);
+    assert_eq!(probe(&voice_only).unwrap().audio.len(), 1);
+    if let Some(pcm) = support::decode_track(&voice_only, 0) {
+        assert!(support::amplitude_at(&pcm[RATE..RATE * 2], RATE as f32, 880.0) > 0.3);
+        assert!((onset(&pcm) - (voice_enters - start)).abs() < 0.03);
+    }
+    std::fs::remove_file(&voice_only).ok();
 }

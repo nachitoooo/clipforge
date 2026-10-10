@@ -5,7 +5,22 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
+use std::time::Instant;
+
+use clipforge_core::audio::aac_audiotoolbox::AudioToolboxAacEncoder;
+use clipforge_core::audio::test_tone::{TestToneConfig, TestToneSource};
+use clipforge_core::audio::{AudioConfig, AudioEncoder, MicMode};
+use clipforge_core::buffer::BufferConfig;
+use clipforge_core::capture::combined::WithAudio;
+use clipforge_core::capture::test_pattern::{TestPatternConfig, TestPatternSource};
+use clipforge_core::capture::AudioSource;
+use clipforge_core::clip::ClipService;
+use clipforge_core::encode::mock::MockEncoder;
+use clipforge_core::encode::EncoderConfig;
+use clipforge_core::engine::CaptureEngine;
 
 fn scratch() -> PathBuf {
     let dir = std::env::temp_dir().join("clipforge-test-support");
@@ -128,4 +143,72 @@ pub fn amplitude_at(samples: &[f32], rate: f32, freq: f32) -> f32 {
     }
     let power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
     2.0 * power.max(0.0).sqrt() / samples.len() as f32
+}
+
+/// Run a short session (a "game" tone at 440 Hz from the start, a "voice"
+/// tone at 880 Hz joining after 0.5 s) with real AAC encoders, with the
+/// microphone in `mode`; save the last `save` of it and return the clip.
+pub fn record_clip(mode: MicMode, name: &str, save: Duration) -> clipforge_core::clip::SavedClip {
+    let dir = std::env::temp_dir().join("clipforge-mic-mix").join(name);
+    std::fs::remove_dir_all(&dir).ok();
+    let base = Instant::now();
+    let mut engine = CaptureEngine::new(BufferConfig::default());
+    let clips = Arc::new(ClipService::new(engine.buffer(), &dir));
+
+    let video = TestPatternSource::new(TestPatternConfig {
+        width: 64,
+        height: 48,
+        fps: 60,
+        realtime: true,
+        ..Default::default()
+    });
+    let game = TestToneSource::new(TestToneConfig {
+        frequency: 440.0,
+        realtime: true,
+        clock_base: Some(base),
+        ..Default::default()
+    });
+    engine
+        .start_with_audio(
+            Box::new(WithAudio::new(video, game)),
+            Box::new(MockEncoder::new(EncoderConfig {
+                width: 64,
+                height: 48,
+                keyframe_interval: 30,
+                ..Default::default()
+            })),
+            Some(Box::new(
+                AudioToolboxAacEncoder::new(AudioConfig::default()).unwrap(),
+            )),
+            Arc::clone(&clips),
+        )
+        .unwrap();
+
+    std::thread::sleep(Duration::from_millis(500));
+    let mut voice = TestToneSource::new(TestToneConfig {
+        channels: 1,
+        frequency: 880.0,
+        realtime: true,
+        clock_base: Some(base),
+        ..Default::default()
+    });
+    let rx = voice.start().unwrap();
+    let mic_encoder: Option<Box<dyn AudioEncoder>> = (mode == MicMode::Separate).then(|| {
+        Box::new(
+            AudioToolboxAacEncoder::new(AudioConfig {
+                channels: 1,
+                bitrate: 96_000,
+                ..Default::default()
+            })
+            .unwrap(),
+        ) as Box<dyn AudioEncoder>
+    });
+    engine
+        .attach_microphone(Box::new(voice), rx, mode, mic_encoder)
+        .unwrap();
+
+    std::thread::sleep(Duration::from_millis(3500));
+    let saved = clips.save_last(save).unwrap();
+    engine.stop();
+    saved
 }
