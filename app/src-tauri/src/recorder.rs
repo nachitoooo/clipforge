@@ -38,9 +38,22 @@ impl Recorder {
     /// Start the replay buffer (real capture + hardware encoder).
     #[cfg(target_os = "macos")]
     pub fn start(&self) -> Result<(), String> {
+        use clipforge_core::audio::aac_audiotoolbox::AudioToolboxAacEncoder;
+        use clipforge_core::audio::{AudioConfig, AudioEncoder};
         use clipforge_core::capture::macos::{ScreenCaptureConfig, ScreenCaptureKitSource};
         use clipforge_core::encode::videotoolbox::VideoToolboxEncoder;
         use clipforge_core::encode::EncoderConfig;
+
+        // Sound is best effort: without an AAC encoder the clips are silent
+        // instead of the whole buffer refusing to start.
+        let audio_encoder: Option<Box<dyn AudioEncoder>> =
+            match AudioToolboxAacEncoder::new(AudioConfig::default()) {
+                Ok(encoder) => Some(Box::new(encoder)),
+                Err(e) => {
+                    eprintln!("clipforge: AAC encoder unavailable, clips will be silent: {e}");
+                    None
+                }
+            };
 
         let config = EncoderConfig::default(); // documented 1080p60 defaults
         let source = ScreenCaptureKitSource::new(ScreenCaptureConfig {
@@ -48,12 +61,18 @@ impl Recorder {
             height: Some(config.height),
             fps: config.fps,
             show_cursor: true,
+            capture_audio: audio_encoder.is_some(),
         });
         let encoder = VideoToolboxEncoder::new(config).map_err(|e| e.to_string())?;
         self.engine
             .lock()
             .expect("engine lock")
-            .start(Box::new(source), Box::new(encoder), Arc::clone(&self.clips))
+            .start_with_audio(
+                Box::new(source),
+                Box::new(encoder),
+                audio_encoder,
+                Arc::clone(&self.clips),
+            )
             .map_err(|e| e.to_string())
     }
 
