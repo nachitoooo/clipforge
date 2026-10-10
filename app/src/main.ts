@@ -2,7 +2,8 @@ import * as api from "./api";
 import { h, svg } from "./ui/dom";
 import { createGallery } from "./ui/gallery";
 import { icons } from "./ui/icons";
-import { libraryPlaceholder, renderPlaceholder, settingsPlaceholder } from "./ui/placeholder";
+import { libraryPlaceholder, renderPlaceholder } from "./ui/placeholder";
+import { createSettings } from "./ui/settings";
 import { toast } from "./ui/toast";
 
 type ViewId = "recent" | "library" | "settings";
@@ -34,13 +35,15 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   const gallery = createGallery(views.recent);
   renderPlaceholder(views.library, libraryPlaceholder);
-  renderPlaceholder(views.settings, settingsPlaceholder);
+  const settingsView = createSettings(views.settings);
 
   const buttons = new Map<ViewId, HTMLButtonElement>();
   function select(id: ViewId) {
     for (const [viewId, el] of Object.entries(views) as [ViewId, HTMLElement][]) {
       el.hidden = viewId !== id;
     }
+    if (id === "settings") settingsView.onShow();
+    else settingsView.onHide();
     for (const [navId, button] of buttons) {
       const active = navId === id;
       button.classList.toggle("active", active);

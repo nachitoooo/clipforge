@@ -11,6 +11,7 @@
 use std::time::Duration;
 
 use clipforge_core::audio::aac_mediafoundation::MediaFoundationAacEncoder;
+use clipforge_core::audio::mic::{list_input_devices, CpalMicSource, MicControls};
 use clipforge_core::audio::test_tone::{TestToneConfig, TestToneSource};
 use clipforge_core::audio::wasapi::WasapiLoopbackSource;
 use clipforge_core::audio::{AudioChunk, AudioConfig, AudioEncoder};
@@ -111,4 +112,51 @@ fn wasapi_loopback_smoke() {
         assert_eq!(chunk.channels, 2);
         assert_eq!(chunk.sample_rate, 48_000);
     }
+}
+
+#[test]
+#[ignore = "needs a Windows audio input device"]
+fn cpal_lists_input_devices() {
+    let devices = list_input_devices().expect("device enumeration works");
+    println!("microphones: {devices:#?}");
+    assert!(!devices.is_empty(), "no input devices found");
+}
+
+#[test]
+#[ignore = "needs a Windows microphone and its privacy permission"]
+fn cpal_microphone_smoke() {
+    // cpal stamps capture instants with QueryPerformanceCounter on Windows,
+    // the same clock as the epoch below.
+    let epoch = SharedEpoch::new();
+    epoch.get_or_set(qpc_now_ns());
+    let controls = MicControls::new(1.0, false);
+    let mut mic = CpalMicSource::new(None, controls.clone(), epoch);
+    let mut rx = mic.start().expect("microphone starts (permission?)");
+    std::thread::sleep(Duration::from_millis(1500));
+    mic.stop();
+
+    let mut chunks = Vec::new();
+    while let Ok(chunk) = rx.try_recv() {
+        chunks.push(chunk);
+    }
+    println!(
+        "microphone delivered {} chunks; signal heard: {}",
+        chunks.len(),
+        controls.input.heard_signal()
+    );
+    assert!(
+        chunks.len() > 50,
+        "expected ~150 chunks in 1.5 s, got {}",
+        chunks.len()
+    );
+    for pair in chunks.windows(2) {
+        assert!(
+            pair[1].timestamp > pair[0].timestamp,
+            "timestamps must increase"
+        );
+    }
+    for chunk in &chunks {
+        assert_eq!((chunk.channels, chunk.sample_rate), (1, 48_000));
+    }
+    assert!(controls.error().is_none());
 }

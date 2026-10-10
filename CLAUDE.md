@@ -83,6 +83,19 @@ Audio rule: the mp4 muxer stores sample *durations*, not gaps, so audio must
 reach it gap-free — `ContinuityGuard` fills holes with silence before encoding.
 Audio is best effort: a failing audio path must never stop the video.
 
+Audio lanes: the replay buffer holds AAC in lanes — `Main` (game audio, or game
++ voice mixed) and `Mic` (voice on its own track). The microphone attaches to a
+*running* capture (`CaptureEngine::attach_microphone`) either mixed in real time
+by `audio/mixer.rs` (between the system capture and the encoder) or as its own
+lane; it shares the video's `SharedEpoch` clock. Never mix at save time — that
+would mean decoding and re-encoding.
+
+Settings (`app/src-tauri/src/settings.rs`): every field has a serde default, one
+validation gate (`Settings::validated`), and an apply path that is either live
+(atomics) or restarts only the affected part. Anything that restarts the video
+capture empties the buffer, so it needs a warning in the UI. See
+`docs/settings-roadmap.md` for the checklist and the planned settings.
+
 Key design rule: **the ring buffer stores encoded frames** (not raw), so RAM
 stays bounded (~100MB for 2 min of 1080p60) and saving a clip is a remux, not
 a re-encode. Buffer eviction must respect GOP boundaries so every saved clip

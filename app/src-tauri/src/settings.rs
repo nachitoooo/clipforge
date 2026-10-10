@@ -319,4 +319,30 @@ mod tests {
         assert!(json["microphone"]["deviceId"].is_null());
         assert_eq!(json["microphone"]["mode"], "mixed");
     }
+
+    #[test]
+    fn every_accelerator_the_ui_can_record_is_accepted() {
+        // The shapes produced by `captureAccelerator` in app/src/lib/hotkey.ts.
+        for accelerator in [
+            "CommandOrControl+Shift+M",
+            "Control+K",
+            "Super+K",
+            "CommandOrControl+Alt+Shift+F5",
+            "Alt+7",
+            "Alt+Space",
+            "Alt+ArrowUp",
+            "CommandOrControl+Alt+ArrowDown",
+            "Control+Alt+ArrowLeft",
+            "Alt+ArrowRight",
+            "Alt+F24",
+            "CommandOrControl+Z",
+        ] {
+            let mut s = Settings::default();
+            s.microphone.mute_shortcut = accelerator.to_string();
+            assert!(
+                s.validated(&[save_clip()]).is_ok(),
+                "{accelerator} should be accepted"
+            );
+        }
+    }
 }

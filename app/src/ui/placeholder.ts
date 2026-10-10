@@ -28,10 +28,3 @@ export const libraryPlaceholder = {
   description:
     "Acá vas a poder organizar tus clips en carpetas. Por ahora todos tus clips están en «Recientes».",
 };
-
-export const settingsPlaceholder = {
-  title: "Configuración",
-  icon: icons.settings,
-  description:
-    "Duración del buffer, calidad, carpeta de clips y atajos de teclado se van a poder cambiar desde acá.",
-};
