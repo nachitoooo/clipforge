@@ -11,13 +11,18 @@
 //! so any hole in the capture stream must be filled with silence *before*
 //! encoding, or everything after it would drift against the picture.
 
+pub mod level;
+pub mod mixer;
 pub mod mock;
+pub mod resample;
 pub mod test_tone;
 
 #[cfg(target_os = "macos")]
 pub mod aac_audiotoolbox;
 #[cfg(target_os = "windows")]
 pub mod aac_mediafoundation;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod mic;
 #[cfg(target_os = "windows")]
 pub mod wasapi;
 
@@ -27,6 +32,27 @@ use thiserror::Error;
 
 /// Samples (per channel) in one AAC-LC access unit.
 pub const AAC_FRAME_SAMPLES: u32 = 1024;
+
+/// Which track of the clip an audio packet belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AudioLaneId {
+    /// Game/system audio — or game and voice mixed, see [`MicMode::Mixed`].
+    Main,
+    /// The microphone on its own track ([`MicMode::Separate`]).
+    Mic,
+}
+
+/// How the microphone ends up in a saved clip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MicMode {
+    /// Voice and game are mixed into the main track before encoding: plays
+    /// everywhere, can't be muted afterwards.
+    #[default]
+    Mixed,
+    /// Voice is encoded on its own track: can be muted afterwards, but many
+    /// players only play the first track.
+    Separate,
+}
 
 /// A run of raw audio from a capture backend.
 #[derive(Clone)]

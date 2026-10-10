@@ -66,6 +66,7 @@ pub struct ScreenCaptureKitSource {
     dropped: Arc<AtomicU64>,
     audio_rx: Option<mpsc::Receiver<AudioChunk>>,
     audio_dropped: Arc<AtomicU64>,
+    epoch: Option<SharedEpoch>,
 }
 
 impl ScreenCaptureKitSource {
@@ -77,6 +78,7 @@ impl ScreenCaptureKitSource {
             dropped: Arc::new(AtomicU64::new(0)),
             audio_rx: None,
             audio_dropped: Arc::new(AtomicU64::new(0)),
+            epoch: None,
         }
     }
 
@@ -313,6 +315,7 @@ impl FrameSource for ScreenCaptureKitSource {
         self.audio_dropped.store(0, Ordering::SeqCst);
 
         let epoch = SharedEpoch::new();
+        self.epoch = Some(epoch.clone());
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
         let handler = FrameForwarder {
             tx,
@@ -364,6 +367,10 @@ impl FrameSource for ScreenCaptureKitSource {
 
     fn take_audio(&mut self) -> Option<mpsc::Receiver<AudioChunk>> {
         self.audio_rx.take()
+    }
+
+    fn epoch(&self) -> Option<SharedEpoch> {
+        self.epoch.clone()
     }
 }
 

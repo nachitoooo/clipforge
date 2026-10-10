@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use crate::audio::AudioPacket;
+use crate::audio::{AudioLaneId, AudioPacket};
 use crate::encode::EncodedPacket;
 
 /// Audio is kept slightly longer than `max_duration` so it always covers the
@@ -28,9 +28,60 @@ const AUDIO_TAIL: Duration = Duration::from_millis(100);
 pub struct ClipSlice {
     /// Starts at a keyframe.
     pub video: Vec<EncodedPacket>,
-    /// AAC packets around the video's time span, with a little margin on both
-    /// sides (see `AUDIO_PREROLL`); empty without audio.
+    /// AAC packets of the main lane (game audio, or game + voice mixed)
+    /// around the video's time span, with a little margin on both sides (see
+    /// `AUDIO_PREROLL`); empty without audio.
     pub audio: Vec<AudioPacket>,
+    /// The microphone's own lane, same margins; empty unless the microphone
+    /// is recorded as a separate track.
+    pub mic: Vec<AudioPacket>,
+}
+
+/// One lane of AAC packets: independent of GOP structure, since every AAC
+/// frame decodes on its own.
+#[derive(Debug, Default)]
+struct AudioLane {
+    packets: VecDeque<AudioPacket>,
+    bytes: usize,
+}
+
+impl AudioLane {
+    /// Store a packet (monotonic pts expected). A backwards pts is a
+    /// discontinuity: the history is dropped and the packet starts a new one.
+    /// Keeps at most `window` of audio.
+    fn push(&mut self, packet: AudioPacket, window: Duration) {
+        if self
+            .packets
+            .back()
+            .is_some_and(|last| packet.pts <= last.pts)
+        {
+            self.clear();
+        }
+        self.bytes += packet.data.len();
+        self.packets.push_back(packet);
+        while let (Some(first), Some(last)) = (self.packets.front(), self.packets.back()) {
+            if last.pts - first.pts <= window {
+                break;
+            }
+            if let Some(dropped) = self.packets.pop_front() {
+                self.bytes -= dropped.data.len();
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.packets.clear();
+        self.bytes = 0;
+    }
+
+    /// Packets around the video span `[first, last]`, with pre-roll and tail.
+    fn around(&self, first: Duration, last: Duration) -> Vec<AudioPacket> {
+        self.packets
+            .iter()
+            .filter(|p| p.pts + AUDIO_PREROLL >= first && p.pts <= last + AUDIO_TAIL)
+            .cloned()
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,10 +121,9 @@ pub struct ReplayBuffer {
     packets: VecDeque<EncodedPacket>,
     /// Sum of packet payload sizes (the dominant memory cost).
     bytes: usize,
-    /// AAC packets for the same window; independent of GOP structure since
-    /// every AAC frame decodes on its own.
-    audio: VecDeque<AudioPacket>,
-    audio_bytes: usize,
+    /// AAC lanes for the same window.
+    audio: AudioLane,
+    mic: AudioLane,
     config: BufferConfig,
 }
 
@@ -82,8 +132,8 @@ impl ReplayBuffer {
         Self {
             packets: VecDeque::new(),
             bytes: 0,
-            audio: VecDeque::new(),
-            audio_bytes: 0,
+            audio: AudioLane::default(),
+            mic: AudioLane::default(),
             config,
         }
     }
@@ -179,55 +229,68 @@ impl ReplayBuffer {
         self.packets.iter().skip(start).cloned().collect()
     }
 
-    /// Like [`Self::extract_last`], plus the audio packets that fall inside
-    /// the extracted video's time span.
+    /// Like [`Self::extract_last`], plus the audio packets of every lane that
+    /// fall around the extracted video's time span.
     pub fn extract_last_with_audio(&self, duration: Duration) -> ClipSlice {
         let video = self.extract_last(duration);
-        let audio = match (video.first(), video.last()) {
-            (Some(first), Some(last)) => self
-                .audio
-                .iter()
-                .filter(|p| p.pts + AUDIO_PREROLL >= first.pts && p.pts <= last.pts + AUDIO_TAIL)
-                .cloned()
-                .collect(),
-            _ => Vec::new(),
+        let (audio, mic) = match (video.first(), video.last()) {
+            (Some(first), Some(last)) => (
+                self.audio.around(first.pts, last.pts),
+                self.mic.around(first.pts, last.pts),
+            ),
+            _ => (Vec::new(), Vec::new()),
         };
-        ClipSlice { video, audio }
+        ClipSlice { video, audio, mic }
     }
 
-    /// Add one AAC packet (monotonic pts expected). A backwards pts is a
-    /// discontinuity: the audio history is dropped and the packet starts a
-    /// new one.
+    fn audio_window(&self) -> Duration {
+        self.config.max_duration + AUDIO_WINDOW_MARGIN
+    }
+
+    fn lane_mut(&mut self, lane: AudioLaneId) -> &mut AudioLane {
+        match lane {
+            AudioLaneId::Main => &mut self.audio,
+            AudioLaneId::Mic => &mut self.mic,
+        }
+    }
+
+    fn lane(&self, lane: AudioLaneId) -> &AudioLane {
+        match lane {
+            AudioLaneId::Main => &self.audio,
+            AudioLaneId::Mic => &self.mic,
+        }
+    }
+
+    /// Add one AAC packet to the main lane.
     pub fn push_audio(&mut self, packet: AudioPacket) {
-        if self.audio.back().is_some_and(|last| packet.pts <= last.pts) {
-            self.clear_audio();
-        }
-        self.audio_bytes += packet.data.len();
-        self.audio.push_back(packet);
-
-        let window = self.config.max_duration + AUDIO_WINDOW_MARGIN;
-        while let (Some(first), Some(last)) = (self.audio.front(), self.audio.back()) {
-            if last.pts - first.pts <= window {
-                break;
-            }
-            if let Some(dropped) = self.audio.pop_front() {
-                self.audio_bytes -= dropped.data.len();
-            }
-        }
+        self.push_audio_lane(AudioLaneId::Main, packet);
     }
 
+    pub fn push_audio_lane(&mut self, lane: AudioLaneId, packet: AudioPacket) {
+        let window = self.audio_window();
+        self.lane_mut(lane).push(packet, window);
+    }
+
+    /// Forget the main lane's audio (the video is untouched).
     pub fn clear_audio(&mut self) {
         self.audio.clear();
-        self.audio_bytes = 0;
+    }
+
+    pub fn clear_audio_lane(&mut self, lane: AudioLaneId) {
+        self.lane_mut(lane).clear();
     }
 
     pub fn audio_packet_count(&self) -> usize {
-        self.audio.len()
+        self.audio.packets.len()
     }
 
-    /// Audio payload bytes currently held (small next to the video).
+    pub fn audio_lane_packet_count(&self, lane: AudioLaneId) -> usize {
+        self.lane(lane).packets.len()
+    }
+
+    /// Main-lane audio payload bytes currently held (small next to the video).
     pub fn audio_memory_bytes(&self) -> usize {
-        self.audio_bytes
+        self.audio.bytes
     }
 
     /// pts span between the first and last packet.
@@ -255,7 +318,8 @@ impl ReplayBuffer {
     pub fn clear(&mut self) {
         self.packets.clear();
         self.bytes = 0;
-        self.clear_audio();
+        self.audio.clear();
+        self.mic.clear();
     }
 }
 
@@ -343,7 +407,8 @@ mod audio_tests {
         for k in 0..120_000 / AAC_MS {
             buffer.push_audio(audio(k));
         }
-        let span = buffer.audio.back().unwrap().pts - buffer.audio.front().unwrap().pts;
+        let span =
+            buffer.audio.packets.back().unwrap().pts - buffer.audio.packets.front().unwrap().pts;
         assert!(span <= Duration::from_secs(25), "span {span:?}");
         assert!(span >= Duration::from_secs(24), "span {span:?}");
         assert_eq!(
@@ -375,5 +440,47 @@ mod audio_tests {
         buffer.clear();
         assert!(buffer.is_empty());
         assert_eq!(buffer.audio_packet_count(), 0);
+    }
+
+    #[test]
+    fn the_mic_lane_is_independent_and_extracted_alongside() {
+        let mut buffer = filled(10, 60);
+        for k in 0..10_000 / AAC_MS {
+            buffer.push_audio_lane(AudioLaneId::Mic, audio(k));
+        }
+        assert_eq!(
+            buffer.audio_lane_packet_count(AudioLaneId::Mic),
+            10_000 / AAC_MS as usize
+        );
+        let slice = buffer.extract_last_with_audio(Duration::from_secs(3));
+        assert!(!slice.audio.is_empty() && !slice.mic.is_empty());
+        let (v_first, v_last) = (slice.video.first().unwrap(), slice.video.last().unwrap());
+        assert!(slice.mic.first().unwrap().pts + AUDIO_PREROLL >= v_first.pts);
+        assert!(slice.mic.last().unwrap().pts <= v_last.pts + AUDIO_TAIL);
+
+        // Clearing one lane leaves the other alone.
+        buffer.clear_audio_lane(AudioLaneId::Mic);
+        assert_eq!(buffer.audio_lane_packet_count(AudioLaneId::Mic), 0);
+        assert!(buffer.audio_packet_count() > 0);
+    }
+
+    #[test]
+    fn a_backwards_mic_pts_only_resets_the_mic_lane() {
+        let mut buffer = filled(5, 60);
+        for k in 0..50 {
+            buffer.push_audio_lane(AudioLaneId::Mic, audio(k));
+        }
+        let main_before = buffer.audio_packet_count();
+        buffer.push_audio_lane(AudioLaneId::Mic, audio(0));
+        assert_eq!(buffer.audio_lane_packet_count(AudioLaneId::Mic), 1);
+        assert_eq!(buffer.audio_packet_count(), main_before);
+    }
+
+    #[test]
+    fn clear_empties_the_mic_lane_too() {
+        let mut buffer = filled(5, 60);
+        buffer.push_audio_lane(AudioLaneId::Mic, audio(0));
+        buffer.clear();
+        assert_eq!(buffer.audio_lane_packet_count(AudioLaneId::Mic), 0);
     }
 }

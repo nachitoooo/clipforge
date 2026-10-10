@@ -25,6 +25,10 @@ pub struct TestToneConfig {
     /// Pace to the wall clock (like a real device) instead of generating as
     /// fast as the consumer accepts.
     pub realtime: bool,
+    /// Stamp chunks on a shared clock: the first chunk gets the time elapsed
+    /// since this instant (so a tone started late still lines up with the
+    /// video), later ones follow the sample grid. `None` starts at zero.
+    pub clock_base: Option<std::time::Instant>,
 }
 
 impl Default for TestToneConfig {
@@ -35,6 +39,7 @@ impl Default for TestToneConfig {
             frequency: 440.0,
             duration_limit: None,
             realtime: false,
+            clock_base: None,
         }
     }
 }
@@ -73,9 +78,13 @@ impl AudioSource for TestToneSource {
 
         self.generator = Some(std::thread::spawn(move || {
             let epoch = std::time::Instant::now();
+            let offset = config
+                .clock_base
+                .map(|base| base.elapsed())
+                .unwrap_or_default();
             let mut frame_index: u64 = 0;
             while running.load(Ordering::SeqCst) {
-                let timestamp = frames_to_duration(frame_index, config.sample_rate);
+                let timestamp = offset + frames_to_duration(frame_index, config.sample_rate);
                 if config
                     .duration_limit
                     .is_some_and(|limit| timestamp >= limit)
@@ -83,7 +92,7 @@ impl AudioSource for TestToneSource {
                     break;
                 }
                 if config.realtime {
-                    if let Some(wait) = timestamp.checked_sub(epoch.elapsed()) {
+                    if let Some(wait) = (timestamp - offset).checked_sub(epoch.elapsed()) {
                         std::thread::sleep(wait);
                     }
                 }

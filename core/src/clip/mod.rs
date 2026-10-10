@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::buffer::ReplayBuffer;
 use crate::encode::ParameterSets;
-use mp4mux::{write_mp4_with_audio, AudioParams, MuxError, VideoParams};
+use mp4mux::{write_mp4_with_tracks, AudioParams, MuxError, VideoParams};
 
 #[derive(Debug, Error)]
 pub enum ClipError {
@@ -43,8 +43,11 @@ pub struct SavedClip {
     /// Track duration actually written (≥ requested, keyframe-aligned).
     pub duration: Duration,
     pub packets: usize,
-    /// AAC packets muxed alongside the video (0 for a silent clip).
+    /// AAC packets muxed alongside the video in the main audio track (0 for
+    /// a silent clip).
     pub audio_packets: usize,
+    /// AAC packets of the separate microphone track (0 when there is none).
+    pub mic_packets: usize,
     pub bytes: u64,
 }
 
@@ -57,6 +60,8 @@ pub struct ClipService {
     stream_info: Mutex<Option<StreamInfo>>,
     /// Set once an audio encoder is running; without it clips are video-only.
     audio_info: Mutex<Option<AudioParams>>,
+    /// Set while the microphone is recorded as its own track.
+    mic_info: Mutex<Option<AudioParams>>,
 }
 
 impl ClipService {
@@ -66,6 +71,7 @@ impl ClipService {
             clips_dir: clips_dir.into(),
             stream_info: Mutex::new(None),
             audio_info: Mutex::new(None),
+            mic_info: Mutex::new(None),
         }
     }
 
@@ -79,6 +85,11 @@ impl ClipService {
     /// now on clips carry an AAC track whenever the extracted span has audio.
     pub fn set_audio_info(&self, info: AudioParams) {
         *self.audio_info.lock().expect("audio_info lock") = Some(info);
+    }
+
+    /// Announce (or withdraw, with `None`) the separate microphone track.
+    pub fn set_mic_info(&self, info: Option<AudioParams>) {
+        *self.mic_info.lock().expect("mic_info lock") = info;
     }
 
     pub fn clips_dir(&self) -> &Path {
@@ -105,19 +116,24 @@ impl ClipService {
             return Err(ClipError::BufferEmpty);
         }
         let audio_info = *self.audio_info.lock().expect("audio_info lock");
-        let audio = audio_info
-            .as_ref()
-            .map(|params| (params, slice.audio.as_slice()));
+        let mic_info = *self.mic_info.lock().expect("mic_info lock");
+        let mut tracks: Vec<(&AudioParams, &[crate::audio::AudioPacket])> = Vec::new();
+        if let Some(params) = audio_info.as_ref() {
+            tracks.push((params, slice.audio.as_slice()));
+        }
+        if let Some(params) = mic_info.as_ref() {
+            tracks.push((params, slice.mic.as_slice()));
+        }
 
         std::fs::create_dir_all(&self.clips_dir)
             .map_err(|e| ClipError::ClipsDir(self.clips_dir.clone(), e))?;
         let path = self.unique_clip_path();
-        let written = write_mp4_with_audio(
+        let written = write_mp4_with_tracks(
             &path,
             &info.video,
             &info.parameter_sets,
             &slice.video,
-            audio,
+            &tracks,
         )?;
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
@@ -125,7 +141,16 @@ impl ClipService {
             path,
             duration: written,
             packets: slice.video.len(),
-            audio_packets: audio.map_or(0, |(_, packets)| packets.len()),
+            audio_packets: if audio_info.is_some() {
+                slice.audio.len()
+            } else {
+                0
+            },
+            mic_packets: if mic_info.is_some() {
+                slice.mic.len()
+            } else {
+                0
+            },
             bytes,
         })
     }

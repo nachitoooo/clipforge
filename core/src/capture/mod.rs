@@ -54,6 +54,8 @@ impl std::fmt::Debug for RawFrame {
 pub enum CaptureError {
     #[error("screen recording permission denied — grant it in System Settings → Privacy & Security → Screen Recording, then restart the app")]
     PermissionDenied,
+    #[error("microphone permission denied — grant it in System Settings → Privacy & Security → Microphone (Windows: Settings → Privacy → Microphone, \"Let desktop apps access your microphone\"), then try again")]
+    MicrophonePermissionDenied,
     #[error("no capturable display found")]
     NoDisplay,
     #[error("capture source already started")]
@@ -103,6 +105,13 @@ pub trait FrameSource: Send {
     /// sources that capture audio return `Some`, and only after `start`; the
     /// stream can be taken once. Sources without audio keep this default.
     fn take_audio(&mut self) -> Option<mpsc::Receiver<AudioChunk>> {
+        None
+    }
+
+    /// The clock epoch this source stamps its frames with, available after
+    /// `start`. Other capture streams (the microphone) must share it to line
+    /// up with the video. Sources with timestamps of their own return `None`.
+    fn epoch(&self) -> Option<clock::SharedEpoch> {
         None
     }
 }

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use super::edit_list::{add_audio_edit_list, EditEntry};
+use super::edit_list::{add_audio_edit_lists, EditEntry};
 use crate::audio::{AudioConfig, AudioPacket};
 use crate::encode::{Codec, EncodedPacket, ParameterSets};
 
@@ -147,7 +147,6 @@ fn plan_audio(
 }
 
 const VIDEO_TRACK_ID: u32 = 1;
-const AUDIO_TRACK_ID: u32 = 2;
 
 fn aac_config(audio: &AudioParams) -> Result<mp4::AacConfig, MuxError> {
     use mp4::{ChannelConfig, SampleFreqIndex};
@@ -208,17 +207,38 @@ pub fn write_mp4_with_audio(
     packets: &[EncodedPacket],
     audio: Option<(&AudioParams, &[AudioPacket])>,
 ) -> Result<Duration, MuxError> {
+    write_mp4_with_tracks(path, params, parameter_sets, packets, audio.as_slice())
+}
+
+/// [`write_mp4`] plus any number of AAC tracks (game audio, voice, ...), in
+/// the order given: the first one is the track players pick by default.
+/// Each track is aligned to the video on its own, with its own edit list; a
+/// track with nothing audible left is left out.
+pub fn write_mp4_with_tracks(
+    path: &Path,
+    params: &VideoParams,
+    parameter_sets: &ParameterSets,
+    packets: &[EncodedPacket],
+    audio: &[(&AudioParams, &[AudioPacket])],
+) -> Result<Duration, MuxError> {
     let first = packets.first().ok_or(MuxError::NoPackets)?;
-    let audio = audio.filter(|(_, audio_packets)| !audio_packets.is_empty());
-    let audio_conf = match audio {
-        Some((audio_params, _)) => Some(aac_config(audio_params)?),
-        None => None,
-    };
-    // Which audio to write, and the edit list that aligns it. `None` means
-    // there's no audible audio left: write a video-only file.
-    let audio_plan = audio.and_then(|(params, audio_packets)| {
-        plan_audio(audio_packets, params, first.pts).map(|plan| (params, audio_packets, plan))
-    });
+    // Validate every requested audio format up front, then decide which
+    // tracks have something audible and how each is aligned.
+    let mut tracks: Vec<AudioTrack<'_>> = Vec::new();
+    for (audio_params, audio_packets) in audio {
+        if audio_packets.is_empty() {
+            continue;
+        }
+        let conf = aac_config(audio_params)?;
+        if let Some(plan) = plan_audio(audio_packets, audio_params, first.pts) {
+            tracks.push(AudioTrack {
+                params: audio_params,
+                packets: &audio_packets[plan.first..],
+                edits: plan.edits,
+                conf,
+            });
+        }
+    }
     if !first.is_keyframe {
         return Err(MuxError::FirstPacketNotKeyframe);
     }
@@ -261,13 +281,12 @@ pub fn write_mp4_with_audio(
             pic_param_set: pps.clone(),
         }),
     })?;
-
-    if let (Some((audio_params, _, _)), Some(conf)) = (&audio_plan, audio_conf) {
+    for track in &tracks {
         writer.add_track(&mp4::TrackConfig {
             track_type: mp4::TrackType::Audio,
-            timescale: audio_params.sample_rate,
+            timescale: track.params.sample_rate,
             language: "und".to_string(),
-            media_conf: mp4::MediaConfig::AacConfig(conf),
+            media_conf: mp4::MediaConfig::AacConfig(track.conf.clone()),
         })?;
     }
 
@@ -291,36 +310,44 @@ pub fn write_mp4_with_audio(
         }
     };
 
-    let audio_packets: &[AudioPacket] = audio_plan
-        .as_ref()
-        .map_or(&[], |(_, all, plan)| &all[plan.first..]);
-    let audio_rate = audio_plan.as_ref().map_or(1, |(a, _, _)| a.sample_rate);
-    let mut audio_ticks_written = 0u64;
-    let mut audio_sample = |j: usize| {
-        let packet = &audio_packets[j];
-        let sample = mp4::Mp4Sample {
-            start_time: audio_ticks_written,
-            duration: audio_ticks(packet, audio_rate),
-            rendering_offset: 0,
-            is_sync: true, // every AAC frame decodes on its own
-            bytes: bytes::Bytes::copy_from_slice(&packet.data),
-        };
-        audio_ticks_written += u64::from(sample.duration);
-        sample
-    };
-
-    // Merge by presentation time; video first on ties.
-    let (mut i, mut j) = (0usize, 0usize);
-    while i < packets.len() || j < audio_packets.len() {
-        let video_due = i < packets.len()
-            && (j >= audio_packets.len()
-                || packets[i].pts - base_pts <= audio_packets[j].pts.saturating_sub(base_pts));
-        if video_due {
-            writer.write_sample(VIDEO_TRACK_ID, &video_sample(i))?;
-            i += 1;
-        } else {
-            writer.write_sample(AUDIO_TRACK_ID, &audio_sample(j))?;
-            j += 1;
+    // Merge all streams by presentation time (video first on ties) so the
+    // file interleaves tracks and players can stream it.
+    let mut video_next = 0usize;
+    let mut next: Vec<usize> = vec![0; tracks.len()];
+    let mut ticks_written: Vec<u64> = vec![0; tracks.len()];
+    loop {
+        let mut due: Option<(Duration, Option<usize>)> = None; // (time, None = video)
+        if video_next < packets.len() {
+            due = Some((packets[video_next].pts - base_pts, None));
+        }
+        for (k, track) in tracks.iter().enumerate() {
+            if let Some(packet) = track.packets.get(next[k]) {
+                let time = packet.pts.saturating_sub(base_pts);
+                if due.is_none_or(|(best, _)| time < best) {
+                    due = Some((time, Some(k)));
+                }
+            }
+        }
+        match due {
+            None => break,
+            Some((_, None)) => {
+                writer.write_sample(VIDEO_TRACK_ID, &video_sample(video_next))?;
+                video_next += 1;
+            }
+            Some((_, Some(k))) => {
+                let track = &tracks[k];
+                let packet = &track.packets[next[k]];
+                let sample = mp4::Mp4Sample {
+                    start_time: ticks_written[k],
+                    duration: audio_ticks(packet, track.params.sample_rate),
+                    rendering_offset: 0,
+                    is_sync: true, // every AAC frame decodes on its own
+                    bytes: bytes::Bytes::copy_from_slice(&packet.data),
+                };
+                ticks_written[k] += u64::from(sample.duration);
+                writer.write_sample(VIDEO_TRACK_ID + 1 + k as u32, &sample)?;
+                next[k] += 1;
+            }
         }
     }
     writer.write_end()?;
@@ -328,14 +355,22 @@ pub fn write_mp4_with_audio(
     std::io::Write::flush(&mut file)?;
     drop(file);
 
-    if let Some((_, _, plan)) = &audio_plan {
-        if !plan.edits.is_empty() {
-            add_audio_edit_list(path, &plan.edits)?;
-        }
+    let edits: Vec<Vec<EditEntry>> = tracks.iter().map(|t| t.edits.clone()).collect();
+    if edits.iter().any(|e| !e.is_empty()) {
+        add_audio_edit_lists(path, &edits)?;
     }
 
     let last = packets.last().expect("checked non-empty");
     Ok(last.pts - base_pts + Duration::from_secs(1) / params.fps.max(1))
+}
+
+/// One audio track about to be written.
+struct AudioTrack<'a> {
+    params: &'a AudioParams,
+    /// Packets from the planned starting point on.
+    packets: &'a [AudioPacket],
+    edits: Vec<EditEntry>,
+    conf: mp4::AacConfig,
 }
 
 fn to_ticks(t: Duration) -> u64 {

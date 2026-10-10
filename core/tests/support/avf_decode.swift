@@ -3,22 +3,25 @@
 // timeline of interleaved stereo f32 samples at 48 kHz, starting at
 // presentation time 0 (gaps, e.g. an empty edit at the start, are zeros).
 //
-// usage: avf_decode <in.mp4> <out.f32>
+// usage: avf_decode <in.mp4> <out.f32> [audio-track-index]
 import AVFoundation
 import Foundation
 
 let args = CommandLine.arguments
-guard args.count == 3 else {
-    FileHandle.standardError.write("usage: avf_decode <in.mp4> <out.f32>\n".data(using: .utf8)!)
+guard args.count == 3 || args.count == 4 else {
+    FileHandle.standardError.write("usage: avf_decode <in.mp4> <out.f32> [audio-track-index]\n".data(using: .utf8)!)
     exit(2)
 }
+let trackIndex = args.count == 4 ? (Int(args[3]) ?? 0) : 0
 
 let rate = 48_000.0
 let asset = AVURLAsset(url: URL(fileURLWithPath: args[1]))
-guard let track = asset.tracks(withMediaType: .audio).first else {
+let audioTracks = asset.tracks(withMediaType: .audio)
+guard trackIndex < audioTracks.count else {
     FileHandle.standardError.write("no audio track\n".data(using: .utf8)!)
     exit(3)
 }
+let track = audioTracks[trackIndex]
 
 let reader = try AVAssetReader(asset: asset)
 let output = AVAssetReaderTrackOutput(

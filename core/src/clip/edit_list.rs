@@ -84,48 +84,73 @@ fn handler_is_sound(trak_payload: &[u8]) -> Result<bool, MuxError> {
     Ok(false)
 }
 
-/// Insert `edts` after the `tkhd` of the first sound track in a complete
-/// `moov` box. Returns the new `moov` bytes; `Ok(None)` if there is no sound
-/// track (nothing to do).
-pub(crate) fn patch_moov(moov: &[u8], edts: &[u8]) -> Result<Option<Vec<u8>>, MuxError> {
+/// Insert an `edts` box after the `tkhd` of the sound tracks of a complete
+/// `moov` box: `edts_per_sound_track[i]` goes to the i-th sound track (in
+/// file order); `None` leaves that track alone. Returns the new `moov`
+/// bytes, or `Ok(None)` if nothing needed patching.
+pub(crate) fn patch_moov(
+    moov: &[u8],
+    edts_per_sound_track: &[Option<Vec<u8>>],
+) -> Result<Option<Vec<u8>>, MuxError> {
     let bad = || MuxError::Io(std::io::Error::other("malformed moov box"));
     if moov.len() < 8 || &moov[4..8] != b"moov" {
         return Err(bad());
     }
     let payload = &moov[8..];
-    for (kind, t_start, t_end) in boxes(payload)? {
-        if &kind != b"trak" || !handler_is_sound(&payload[t_start + 8..t_end])? {
-            continue;
+    let mut out = moov[..8].to_vec();
+    let mut sound_index = 0usize;
+    let mut patched_any = false;
+
+    for (kind, start, end) in boxes(payload)? {
+        let child = &payload[start..end];
+        let mut edts = None;
+        if &kind == b"trak" && handler_is_sound(&child[8..])? {
+            edts = edts_per_sound_track
+                .get(sound_index)
+                .and_then(|e| e.as_deref());
+            sound_index += 1;
         }
-        let trak = &payload[t_start..t_end];
-        let tkhd_end = boxes(&trak[8..])?
+        let Some(edts) = edts else {
+            out.extend_from_slice(child);
+            continue;
+        };
+
+        let tkhd_end = boxes(&child[8..])?
             .into_iter()
             .find(|(k, _, _)| k == b"tkhd")
             .map(|(_, _, e)| 8 + e)
             .ok_or_else(bad)?;
-
-        let mut new_trak = Vec::with_capacity(trak.len() + edts.len());
-        new_trak.extend_from_slice(&trak[..tkhd_end]);
-        new_trak.extend_from_slice(edts);
-        new_trak.extend_from_slice(&trak[tkhd_end..]);
-        let new_trak_len = new_trak.len() as u32;
-        new_trak[..4].copy_from_slice(&new_trak_len.to_be_bytes());
-
-        let mut out = Vec::with_capacity(moov.len() + edts.len());
-        out.extend_from_slice(&moov[..8 + t_start]);
-        out.extend_from_slice(&new_trak);
-        out.extend_from_slice(&moov[8 + t_end..]);
-        let out_len = out.len() as u32;
-        out[..4].copy_from_slice(&out_len.to_be_bytes());
-        return Ok(Some(out));
+        let mut trak = Vec::with_capacity(child.len() + edts.len());
+        trak.extend_from_slice(&child[..tkhd_end]);
+        trak.extend_from_slice(edts);
+        trak.extend_from_slice(&child[tkhd_end..]);
+        let trak_len = trak.len() as u32;
+        trak[..4].copy_from_slice(&trak_len.to_be_bytes());
+        out.extend_from_slice(&trak);
+        patched_any = true;
     }
-    Ok(None)
+    if !patched_any {
+        return Ok(None);
+    }
+    let out_len = out.len() as u32;
+    out[..4].copy_from_slice(&out_len.to_be_bytes());
+    Ok(Some(out))
 }
 
-/// Add `entries` as the edit list of the sound track of the finished file at
-/// `path`. The file must end with its `moov` box (as the `mp4` writer leaves
-/// it).
+/// Add `entries` as the edit list of the (single) sound track of the
+/// finished file at `path`. See [`add_audio_edit_lists`].
 pub fn add_audio_edit_list(path: &Path, entries: &[EditEntry]) -> Result<(), MuxError> {
+    add_audio_edit_lists(path, &[entries.to_vec()])
+}
+
+/// Give each sound track of the finished file at `path` its edit list:
+/// `per_sound_track[i]` is for the i-th sound track in file order (an empty
+/// list leaves that track without one). The file must end with its `moov`
+/// box (as the `mp4` writer leaves it).
+pub fn add_audio_edit_lists(
+    path: &Path,
+    per_sound_track: &[Vec<EditEntry>],
+) -> Result<(), MuxError> {
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let len = file.metadata()?.len();
 
@@ -162,7 +187,11 @@ pub fn add_audio_edit_list(path: &Path, entries: &[EditEntry]) -> Result<(), Mux
     let mut moov = Vec::new();
     file.read_to_end(&mut moov)?;
 
-    if let Some(patched) = patch_moov(&moov, &edts_box(entries))? {
+    let edts: Vec<Option<Vec<u8>>> = per_sound_track
+        .iter()
+        .map(|entries| (!entries.is_empty()).then(|| edts_box(entries)))
+        .collect();
+    if let Some(patched) = patch_moov(&moov, &edts)? {
         file.set_len(moov_start)?;
         file.seek(SeekFrom::Start(moov_start))?;
         file.write_all(&patched)?;
@@ -242,7 +271,9 @@ mod tests {
     fn inserts_edts_after_tkhd_of_the_sound_track_only() {
         let original = moov(&[trak(b"vide", 1), trak(b"soun", 2)]);
         let edts = edts_box(&entries());
-        let patched = patch_moov(&original, &edts).unwrap().unwrap();
+        let patched = patch_moov(&original, &[Some(edts.clone())])
+            .unwrap()
+            .unwrap();
 
         assert_eq!(patched.len(), original.len() + edts.len());
         // Outer sizes were fixed up.
@@ -276,17 +307,17 @@ mod tests {
     #[test]
     fn a_file_without_a_sound_track_is_left_alone() {
         let original = moov(&[trak(b"vide", 1)]);
-        assert!(patch_moov(&original, &edts_box(&entries()))
+        assert!(patch_moov(&original, &[Some(edts_box(&entries()))])
             .unwrap()
             .is_none());
     }
 
     #[test]
     fn malformed_input_is_an_error_not_a_panic() {
-        assert!(patch_moov(b"nope", &edts_box(&entries())).is_err());
+        assert!(patch_moov(b"nope", &[Some(edts_box(&entries()))]).is_err());
         let mut truncated = moov(&[trak(b"soun", 2)]);
         truncated.truncate(truncated.len() - 5);
-        assert!(patch_moov(&truncated, &edts_box(&entries())).is_err());
+        assert!(patch_moov(&truncated, &[Some(edts_box(&entries()))]).is_err());
     }
 
     #[test]
@@ -311,5 +342,62 @@ mod tests {
         let prefix = file.len() - moov(&[trak(b"vide", 1), trak(b"soun", 2)]).len();
         assert_eq!(&patched[..prefix], &file[..prefix]);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn each_sound_track_gets_its_own_edit_list() {
+        let original = moov(&[trak(b"vide", 1), trak(b"soun", 2), trak(b"soun", 3)]);
+        let first = edts_box(&entries());
+        let second = edts_box(&[EditEntry {
+            segment_duration: 5,
+            media_time: 7,
+        }]);
+        let patched = patch_moov(&original, &[Some(first.clone()), Some(second.clone())])
+            .unwrap()
+            .unwrap();
+        assert_eq!(patched.len(), original.len() + first.len() + second.len());
+
+        let payload = &patched[8..];
+        let traks: Vec<_> = boxes(payload)
+            .unwrap()
+            .into_iter()
+            .filter(|(k, _, _)| k == b"trak")
+            .collect();
+        let children = |i: usize| -> Vec<[u8; 4]> {
+            boxes(&payload[traks[i].1 + 8..traks[i].2])
+                .unwrap()
+                .into_iter()
+                .map(|(k, _, _)| k)
+                .collect()
+        };
+        assert_eq!(children(0), [*b"tkhd", *b"mdia"]);
+        assert_eq!(children(1), [*b"tkhd", *b"edts", *b"mdia"]);
+        assert_eq!(children(2), [*b"tkhd", *b"edts", *b"mdia"]);
+    }
+
+    #[test]
+    fn a_track_without_an_edit_list_is_skipped_but_still_counted() {
+        // Two sound tracks, only the second needs an edit list.
+        let original = moov(&[trak(b"vide", 1), trak(b"soun", 2), trak(b"soun", 3)]);
+        let edts = edts_box(&entries());
+        let patched = patch_moov(&original, &[None, Some(edts.clone())])
+            .unwrap()
+            .unwrap();
+        assert_eq!(patched.len(), original.len() + edts.len());
+        let payload = &patched[8..];
+        let traks: Vec<_> = boxes(payload)
+            .unwrap()
+            .into_iter()
+            .filter(|(k, _, _)| k == b"trak")
+            .collect();
+        let count = |i: usize| boxes(&payload[traks[i].1 + 8..traks[i].2]).unwrap().len();
+        assert_eq!((count(1), count(2)), (2, 3));
+    }
+
+    #[test]
+    fn nothing_to_patch_means_no_change() {
+        let original = moov(&[trak(b"vide", 1), trak(b"soun", 2)]);
+        assert!(patch_moov(&original, &[None]).unwrap().is_none());
+        assert!(patch_moov(&original, &[]).unwrap().is_none());
     }
 }
