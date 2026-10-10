@@ -1,6 +1,8 @@
 //! The background capture engine: wires a [`FrameSource`] through an
 //! [`Encoder`] into the shared [`ReplayBuffer`], on a dedicated thread so
-//! blocking hardware encoders never touch an async runtime.
+//! blocking hardware encoders never touch an async runtime. When the source
+//! also captures audio, a second thread runs it through an [`AudioEncoder`]
+//! into the same buffer.
 //!
 //! The engine is what "start/stop buffer" controls (tray, UI, tests). Saving
 //! clips is *not* its job — a [`crate::clip::ClipService`] shares the same
@@ -11,9 +13,10 @@ use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 
+use crate::audio::{AudioEncoder, AudioError, ContinuityGuard};
 use crate::buffer::{BufferConfig, ReplayBuffer};
 use crate::capture::{CaptureError, FrameSource};
-use crate::clip::mp4mux::VideoParams;
+use crate::clip::mp4mux::{AudioParams, VideoParams};
 use crate::clip::{ClipService, StreamInfo};
 use crate::encode::{EncodeError, Encoder};
 
@@ -33,10 +36,14 @@ pub struct EngineStats {
     pub frames_encoded: u64,
     pub packets_buffered: u64,
     pub encode_errors: u64,
+    /// AAC packets stored in the buffer (0 when audio isn't being captured).
+    pub audio_packets_buffered: u64,
+    pub audio_errors: u64,
 }
 
 struct Worker {
     handle: std::thread::JoinHandle<()>,
+    audio_handle: Option<std::thread::JoinHandle<()>>,
     source: Box<dyn FrameSource>,
 }
 
@@ -46,6 +53,8 @@ pub struct CaptureEngine {
     frames_encoded: Arc<AtomicU64>,
     packets_buffered: Arc<AtomicU64>,
     encode_errors: Arc<AtomicU64>,
+    audio_packets_buffered: Arc<AtomicU64>,
+    audio_errors: Arc<AtomicU64>,
     worker: Option<Worker>,
 }
 
@@ -56,6 +65,8 @@ impl CaptureEngine {
             frames_encoded: Arc::new(AtomicU64::new(0)),
             packets_buffered: Arc::new(AtomicU64::new(0)),
             encode_errors: Arc::new(AtomicU64::new(0)),
+            audio_packets_buffered: Arc::new(AtomicU64::new(0)),
+            audio_errors: Arc::new(AtomicU64::new(0)),
             worker: None,
         }
     }
@@ -77,6 +88,8 @@ impl CaptureEngine {
             frames_encoded: self.frames_encoded.load(Ordering::Relaxed),
             packets_buffered: self.packets_buffered.load(Ordering::Relaxed),
             encode_errors: self.encode_errors.load(Ordering::Relaxed),
+            audio_packets_buffered: self.audio_packets_buffered.load(Ordering::Relaxed),
+            audio_errors: self.audio_errors.load(Ordering::Relaxed),
         }
     }
 
@@ -86,19 +99,46 @@ impl CaptureEngine {
     /// sets, so clip saving becomes possible.
     pub fn start(
         &mut self,
+        source: Box<dyn FrameSource>,
+        encoder: Box<dyn Encoder>,
+        clips: Arc<ClipService>,
+    ) -> Result<(), EngineError> {
+        self.start_with_audio(source, encoder, None, clips)
+    }
+
+    /// [`Self::start`] plus audio: if `source` captures audio
+    /// ([`FrameSource::take_audio`]) it is encoded with `audio_encoder` and
+    /// stored next to the video, so saved clips carry sound. A source without
+    /// audio simply yields silent clips.
+    pub fn start_with_audio(
+        &mut self,
         mut source: Box<dyn FrameSource>,
         mut encoder: Box<dyn Encoder>,
+        audio_encoder: Option<Box<dyn AudioEncoder>>,
         clips: Arc<ClipService>,
     ) -> Result<(), EngineError> {
         if self.is_running() {
             return Err(EngineError::AlreadyRunning);
         }
         let mut rx = source.start()?;
+        // Taking the stream even without an encoder closes it, so a source
+        // that blocks on a full audio channel is released.
+        let audio = audio_encoder.zip(source.take_audio());
 
         let buffer = Arc::clone(&self.buffer);
         let frames_encoded = Arc::clone(&self.frames_encoded);
         let packets_buffered = Arc::clone(&self.packets_buffered);
         let encode_errors = Arc::clone(&self.encode_errors);
+        let audio_handle = audio.map(|(audio_encoder, audio_rx)| {
+            spawn_audio_worker(
+                audio_encoder,
+                audio_rx,
+                Arc::clone(&self.buffer),
+                Arc::clone(&clips),
+                Arc::clone(&self.audio_packets_buffered),
+                Arc::clone(&self.audio_errors),
+            )
+        });
 
         let handle = std::thread::Builder::new()
             .name("clipforge-engine".into())
@@ -152,7 +192,11 @@ impl CaptureEngine {
             })
             .expect("spawn engine thread");
 
-        self.worker = Some(Worker { handle, source });
+        self.worker = Some(Worker {
+            handle,
+            audio_handle,
+            source,
+        });
         Ok(())
     }
 
@@ -160,8 +204,11 @@ impl CaptureEngine {
     /// minutes can still be saved after stopping. Idempotent.
     pub fn stop(&mut self) {
         if let Some(mut worker) = self.worker.take() {
-            worker.source.stop(); // closes the frame channel → thread ends
+            worker.source.stop(); // closes the frame channels → threads end
             let _ = worker.handle.join();
+            if let Some(audio) = worker.audio_handle {
+                let _ = audio.join();
+            }
         }
     }
 
@@ -170,8 +217,68 @@ impl CaptureEngine {
     pub fn join(&mut self) {
         if let Some(worker) = self.worker.take() {
             let _ = worker.handle.join();
+            if let Some(audio) = worker.audio_handle {
+                let _ = audio.join();
+            }
         }
     }
+}
+
+/// Audio counterpart of the video worker: chunks → continuity guard → AAC →
+/// the shared buffer.
+fn spawn_audio_worker(
+    mut encoder: Box<dyn AudioEncoder>,
+    mut rx: tokio::sync::mpsc::Receiver<crate::audio::AudioChunk>,
+    buffer: Arc<Mutex<ReplayBuffer>>,
+    clips: Arc<ClipService>,
+    packets_buffered: Arc<AtomicU64>,
+    errors: Arc<AtomicU64>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("clipforge-audio".into())
+        .spawn(move || {
+            let config = *encoder.config();
+            clips.set_audio_info(AudioParams {
+                priming_frames: encoder.priming_frames(),
+                ..AudioParams::from(config)
+            });
+            let mut guard = ContinuityGuard::new(config.sample_rate, config.channels);
+
+            let store = |packets: Vec<crate::audio::AudioPacket>| {
+                if packets.is_empty() {
+                    return;
+                }
+                let mut locked = buffer.lock().expect("replay buffer lock");
+                for packet in packets {
+                    locked.push_audio(packet);
+                    packets_buffered.fetch_add(1, Ordering::Relaxed);
+                }
+            };
+            let report = |e: AudioError| {
+                // Keep capturing: a bad chunk must not silence the session.
+                eprintln!("clipforge-audio: {e}");
+                errors.fetch_add(1, Ordering::Relaxed);
+            };
+
+            while let Some(chunk) = rx.blocking_recv() {
+                let Some(guarded) = guard.process(chunk) else {
+                    continue;
+                };
+                if guarded.restart {
+                    buffer.lock().expect("replay buffer lock").clear_audio();
+                    encoder.resync();
+                }
+                match encoder.encode(&guarded.chunk) {
+                    Ok(packets) => store(packets),
+                    Err(e) => report(e),
+                }
+            }
+            match encoder.finish() {
+                Ok(packets) => store(packets),
+                Err(e) => report(e),
+            }
+        })
+        .expect("spawn audio thread")
 }
 
 impl Drop for CaptureEngine {

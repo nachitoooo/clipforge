@@ -5,6 +5,7 @@
 //! remux). The ring buffer stores *encoded* frames so RAM stays bounded and
 //! saving a clip is a remux, never a re-encode.
 
+pub mod audio;
 pub mod buffer;
 pub mod capture;
 pub mod clip;

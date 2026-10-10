@@ -17,6 +17,17 @@ apple-cf = { version = "0.9", default-features = false, features = ["cm", "cv", 
 screencapturekit = "8.0"
 videotoolbox = "0.18"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Performance",
+    "Win32_System_Variant",
+] }
+
 [dev-dependencies]
 mp4 = "0.14"
 tokio = { version = "1", features = ["full", "test-util"] }
