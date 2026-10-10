@@ -89,8 +89,8 @@ impl TestPatternSource {
                 band.wrapping_mul(151),
             );
             let row = &mut data[y * w * 4..(y + 1) * w * 4];
-            for px in row.chunks_exact_mut(4) {
-                px.copy_from_slice(&[b, g, r, 255]);
+            for px in row.as_chunks_mut::<4>().0.iter_mut() {
+                *px = [b, g, r, 255];
             }
         }
 
