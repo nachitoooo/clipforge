@@ -1,3 +1,4 @@
+mod clipmeta;
 mod dispatch;
 mod editor;
 mod folders;
@@ -51,6 +52,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use clipmeta::ClipMetaStore;
 use dispatch::{dispatch, Actions, Command, MuteOutcome};
 use folders::{FolderDraft, FolderInfo, FolderStore};
 use mic::{MicDevice, MicStatus};
@@ -161,6 +163,14 @@ impl Actions for AppActions {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // The game is whatever held the screen for most of the clip. Saving
+        // from the tray or the window works too: ClipForge itself is ignored.
+        let game = self.recorder().detected_game(DEFAULT_CLIP_SECONDS);
+        keep_index(
+            self.app
+                .state::<ClipMetaStore>()
+                .set_detected_game(&name, game.as_deref()),
+        );
         // The gallery refreshes itself on this event (F-3.1 "live update").
         self.app.emit("clip-saved", &name).ok();
         Ok(format!("{:.0} s → {name}", saved.duration.as_secs_f64()))
@@ -245,9 +255,11 @@ fn open_clips_folder(app: AppHandle) {
 fn list_clips(
     recorder: tauri::State<'_, Recorder>,
     folders: tauri::State<'_, FolderStore>,
+    meta: tauri::State<'_, ClipMetaStore>,
 ) -> Result<Vec<library::ClipInfo>, String> {
     let mut clips = library::list_clips(&recorder.clips_dir())?;
     folders.annotate(&mut clips);
+    meta.annotate(&mut clips);
     Ok(clips)
 }
 
@@ -256,7 +268,7 @@ fn library_changed(app: &AppHandle) {
     app.emit("library-changed", ()).ok();
 }
 
-/// The index follows files the app renames, deletes or copies. If it can't be
+/// The indexes follow files the app renames, deletes or copies. If one can't be
 /// written the file operation has already happened, so say so and carry on.
 fn keep_index(result: Result<(), String>) {
     if let Err(e) = result {
@@ -264,18 +276,36 @@ fn keep_index(result: Result<(), String>) {
     }
 }
 
+/// `old` is now `new`: its folders and what is known about it follow.
+fn clip_renamed(app: &AppHandle, old: &str, new: &str) {
+    keep_index(app.state::<FolderStore>().rename_clip(old, new));
+    keep_index(app.state::<ClipMetaStore>().rename_clip(old, new));
+    library_changed(app);
+}
+
+/// These clips are gone from the disk.
+fn clips_deleted(app: &AppHandle, names: &[String]) {
+    keep_index(app.state::<FolderStore>().forget_clips(names));
+    keep_index(app.state::<ClipMetaStore>().forget_clips(names));
+    library_changed(app);
+}
+
+/// `new` is a copy of `source` (a trimmed clip): same folders, same game.
+fn clip_copied(app: &AppHandle, source: &str, new: &str) {
+    keep_index(app.state::<FolderStore>().inherit(source, new));
+    keep_index(app.state::<ClipMetaStore>().inherit(source, new));
+}
+
 #[tauri::command]
 fn rename_clip(
     app: AppHandle,
     recorder: tauri::State<'_, Recorder>,
-    folders: tauri::State<'_, FolderStore>,
     name: String,
     new_name: String,
 ) -> Result<String, String> {
     let new = library::rename_clip(&recorder.clips_dir(), &name, &new_name)?;
     if new != name {
-        keep_index(folders.rename_clip(&name, &new));
-        library_changed(&app);
+        clip_renamed(&app, &name, &new);
     }
     Ok(new)
 }
@@ -284,12 +314,10 @@ fn rename_clip(
 fn delete_clip(
     app: AppHandle,
     recorder: tauri::State<'_, Recorder>,
-    folders: tauri::State<'_, FolderStore>,
     name: String,
 ) -> Result<(), String> {
     library::delete_clip(&recorder.clips_dir(), &name)?;
-    keep_index(folders.forget_clips(&[name]));
-    library_changed(&app);
+    clips_deleted(&app, &[name]);
     Ok(())
 }
 
@@ -361,9 +389,40 @@ fn delete_folder(
     delete_clips: bool,
 ) -> Result<usize, String> {
     let result = library::delete_folder(&recorder.clips_dir(), &folders, &id, delete_clips);
-    // Even a failed attempt may have deleted some clips.
+    match result {
+        Ok(deleted) => {
+            clips_deleted(&app, &deleted);
+            Ok(deleted.len())
+        }
+        Err(e) => {
+            // Even a failed attempt may have deleted some clips.
+            library_changed(&app);
+            Err(e)
+        }
+    }
+}
+
+/// Correct the game of a clip (`None` clears it). With `all`, every clip of the
+/// game it had so far changes too. Returns how many clips changed.
+#[tauri::command]
+fn set_clip_game(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    meta: tauri::State<'_, ClipMetaStore>,
+    name: String,
+    game: Option<String>,
+    all: bool,
+) -> Result<usize, String> {
+    let names = existing_clips(&recorder, &[name])?;
+    let changed = match game.as_deref() {
+        Some(game) if all => meta.set_game_everywhere(&names[0], game)?,
+        game => {
+            meta.set_game(&names[0], game)?;
+            1
+        }
+    };
     library_changed(&app);
-    result
+    Ok(changed)
 }
 
 #[tauri::command]
@@ -458,8 +517,9 @@ async fn trim_clip(
     let dir = app.state::<Recorder>().clips_dir();
     let source = request.name.clone();
     let result = blocking(move || editor::trim_clip(&dir, &request)).await?;
-    // The copy sits in the same folders as the clip it came from.
-    keep_index(app.state::<FolderStore>().inherit(&source, &result.name));
+    // The copy sits in the same folders, and is of the same game, as the clip
+    // it came from.
+    clip_copied(&app, &source, &result.name);
     // The views refresh themselves and highlight the new clip.
     app.emit("clip-saved", &result.name).ok();
     Ok(result)
@@ -560,6 +620,7 @@ pub fn run() {
             create_folder,
             update_folder,
             delete_folder,
+            set_clip_game,
             set_clip_folders,
             add_to_folder,
             remove_from_folder,
@@ -586,6 +647,9 @@ pub fn run() {
             app.manage(Arc::clone(&settings));
             app.manage(FolderStore::load(
                 app.path().app_config_dir()?.join("library.json"),
+            ));
+            app.manage(ClipMetaStore::load(
+                app.path().app_config_dir()?.join("clipmeta.json"),
             ));
             app.manage(Recorder::new(clips_dir, Arc::clone(&settings)));
             app.manage(MeterActive(AtomicBool::new(false)));

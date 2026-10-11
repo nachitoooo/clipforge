@@ -72,6 +72,7 @@ hotkey saves the last N seconds as a clip.
 ```
 core/                  # clipforge-core crate
   src/
+    activity/          # foreground-application lookup + log/tracker (the "game" of a clip)
     capture/           # FrameSource/AudioSource traits + test_pattern.rs, macos/, windows/
     audio/             # AudioEncoder trait, ContinuityGuard, AAC encoders, WASAPI
     encode/            # Encoder trait + videotoolbox.rs, mediafoundation.rs
@@ -108,6 +109,14 @@ a *label* kept in `library.json`, not a directory — clips stay in the flat cli
 folder and a clip can be in several folders, so the UI still names a clip by its
 file name. Anything that renames, deletes or copies a clip must keep the index in
 step (see the command wrappers in `lib.rs`), and reads never write or prune it.
+
+Smart library (`core/src/activity/`, `app/src-tauri/src/clipmeta.rs`,
+`docs/library.md`): while the buffer runs a tracker notes which application is in
+front (name only, local, switchable in Settings); a saved clip is tagged with the
+one that held the screen longest and the game lives in `clipmeta.json`, a second
+index with the same rules as the folder one (both on `persist::JsonStore`). The
+hooks in `lib.rs` (`clip_renamed`, `clips_deleted`, `clip_copied`) must keep
+**both** in step. What is planned next is in `docs/medal-roadmap.md`.
 
 Key design rule: **the ring buffer stores encoded frames** (not raw), so RAM
 stays bounded (~100MB for 2 min of 1080p60) and saving a clip is a remux, not

@@ -15,6 +15,9 @@ export const renameClip = (name: string, newName: string) =>
   invoke<string>("rename_clip", { name, newName });
 export const deleteClip = (name: string) => invoke<void>("delete_clip", { name });
 export const revealClip = (name: string) => invoke<void>("reveal_clip", { name });
+/** Set (or clear, with null) a clip's game; with `all`, every clip of its current game. Resolves with how many changed. */
+export const setClipGame = (name: string, game: string | null, all: boolean) =>
+  invoke<number>("set_clip_game", { name, game, all });
 export const openClipsFolder = () => invoke<void>("open_clips_folder");
 
 // Library folders (src-tauri/src/folders.rs)

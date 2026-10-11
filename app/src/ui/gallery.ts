@@ -1,11 +1,13 @@
 import * as api from "../api";
 import { bufferLabel, type BufferStatus } from "../lib/buffer";
 import { clipCountLabel, groupByDay, type ClipInfo } from "../lib/clips";
+import { applyFilter, layoutFor } from "../lib/filter";
 import type { FolderInfo } from "../lib/folders";
 import { displayAccelerator } from "../lib/hotkey";
 import { DEFAULT_SAVE_SHORTCUT } from "../lib/settings";
 import { createClipCards } from "./clipcard";
 import { h, svg } from "./dom";
+import { createFilterBar } from "./filterbar";
 import { icons } from "./icons";
 import { toast } from "./toast";
 
@@ -34,9 +36,12 @@ export function createGallery(root: HTMLElement): Gallery {
 
   const cards = createClipCards({
     folders: () => folders,
+    allClips: () => clips,
     refresh: () => refresh(),
     isFresh: (name) => fresh.has(name),
   });
+  const bar = createFilterBar({ onChange: () => renderBody(), folderSelector: true });
+  let bodyEl: HTMLElement | null = null;
 
   // ---- header -----------------------------------------------------------
 
@@ -107,26 +112,57 @@ export function createGallery(root: HTMLElement): Gallery {
 
   // ---- render / refresh -------------------------------------------------
 
-  function render(): void {
+  const visibleClips = () => applyFilter(clips, folders, bar.get(), Date.now());
+
+  function emptyState(): HTMLElement {
+    return h(
+      "div",
+      { class: "empty" },
+      svg(icons.forge, "icon empty-icon"),
+      h("h2", {}, "Todavía no hay clips"),
+      h(
+        "p",
+        { class: "muted" },
+        "Jugá tranquilo: ClipForge guarda los últimos segundos en segundo plano. Cuando pase algo bueno, apretá ",
+        h("kbd", {}, hotkeyLabel()),
+        " y el clip aparece acá.",
+      ),
+    );
+  }
+
+  function noMatches(): HTMLElement {
+    return h(
+      "div",
+      { class: "empty" },
+      svg(icons.search, "icon empty-icon"),
+      h("h2", {}, "Ningún clip coincide"),
+      h("p", { class: "muted" }, "Probá con otras palabras o sacá algún filtro."),
+      h(
+        "button",
+        {
+          class: "btn",
+          onclick: () => {
+            bar.reset();
+            renderBody();
+          },
+        },
+        "Limpiar filtros",
+      ),
+    );
+  }
+
+  function buildBody(): HTMLElement {
     const body = h("div", { class: "view-body" });
     if (loaded && clips.length === 0) {
-      body.append(
-        h(
-          "div",
-          { class: "empty" },
-          svg(icons.forge, "icon empty-icon"),
-          h("h2", {}, "Todavía no hay clips"),
-          h(
-            "p",
-            { class: "muted" },
-            "Jugá tranquilo: ClipForge guarda los últimos segundos en segundo plano. Cuando pase algo bueno, apretá ",
-            h("kbd", {}, hotkeyLabel()),
-            " y el clip aparece acá.",
-          ),
-        ),
-      );
-    } else {
-      for (const group of groupByDay(clips, Date.now())) {
+      body.append(emptyState());
+      return body;
+    }
+    const shown = visibleClips();
+    bar.setCount(shown.length, clips.length);
+    if (loaded && shown.length === 0) {
+      body.append(noMatches());
+    } else if (layoutFor(bar.get().sort) === "by-day") {
+      for (const group of groupByDay(shown, Date.now())) {
         body.append(
           h(
             "section",
@@ -136,9 +172,32 @@ export function createGallery(root: HTMLElement): Gallery {
           ),
         );
       }
+    } else {
+      body.append(
+        h("section", { class: "group" }, h("div", { class: "grid" }, ...shown.map((clip) => cards.card(clip)))),
+      );
     }
+    return body;
+  }
+
+  /** The filter changed: only the list under the bar is redone. */
+  function renderBody(): void {
+    if (!bodyEl) return;
+    const next = buildBody();
+    bodyEl.replaceWith(next);
+    bodyEl = next;
+  }
+
+  function render(): void {
+    cards.prune(clips.map((c) => c.name));
+    bar.setData({ clips, folders });
+    bodyEl = buildBody();
     headerEl = header();
-    root.replaceChildren(headerEl, body);
+    const showBar = loaded && clips.length > 0;
+    // Redoing the view must not take the focus out of the search box.
+    bar.keepFocus(() =>
+      root.replaceChildren(...(showBar ? [headerEl!, bar.el, bodyEl!] : [headerEl!, bodyEl!])),
+    );
   }
 
   async function refresh(): Promise<void> {

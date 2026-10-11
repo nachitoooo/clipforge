@@ -2,8 +2,13 @@
 //! the global hotkey, and (later) the UI all drive.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use clipforge_core::activity::{
+    default_ignore, system_source, ActivityLog, ActivityTracker, SAMPLE_INTERVAL,
+};
 
 use clipforge_core::audio::mic::{
     list_input_devices, mic_audio_config, CpalMicSource, MicControls,
@@ -51,6 +56,12 @@ pub struct Recorder {
     /// Serializes `apply_microphone`: the UI, the mute hotkey and the buffer
     /// start can all ask for it at once.
     mic_apply: Mutex<()>,
+    /// Which application was in front lately: where a saved clip's game comes from.
+    activity: Arc<Mutex<ActivityLog>>,
+    /// `settings.library.detectGame`, shared with the tracker thread.
+    detect_game: Arc<AtomicBool>,
+    /// Samples the foreground application while the buffer runs.
+    tracker: Mutex<Option<ActivityTracker>>,
 }
 
 /// AAC encoder for the microphone lane (best effort, like the game audio).
@@ -78,7 +89,8 @@ impl Recorder {
     pub fn new(clips_dir: PathBuf, settings: Arc<SettingsStore>) -> Self {
         let engine = CaptureEngine::new(BufferConfig::default());
         let clips = Arc::new(ClipService::new(engine.buffer(), clips_dir));
-        let mic = settings.get().microphone;
+        let current = settings.get();
+        let mic = current.microphone;
         Self {
             engine: Mutex::new(engine),
             clips,
@@ -87,6 +99,9 @@ impl Recorder {
             mic_controls: MicControls::new(gain_from_percent(mic.gain_percent), mic.muted),
             mic: Mutex::new(MicRuntime::default()),
             mic_apply: Mutex::new(()),
+            activity: Arc::new(Mutex::new(ActivityLog::new())),
+            detect_game: Arc::new(AtomicBool::new(current.library.detect_game)),
+            tracker: Mutex::new(None),
         }
     }
 
@@ -149,7 +164,44 @@ impl Recorder {
                 audio_encoder,
                 Arc::clone(&self.clips),
             )
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        self.start_activity_tracker();
+        Ok(())
+    }
+
+    /// Start noticing which application is in front; a new buffer is a new
+    /// timeline, so what was seen before is forgotten. Best effort: a source
+    /// that can't be had only means clips carry no game.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn start_activity_tracker(&self) {
+        let mut slot = self.tracker.lock().expect("tracker lock");
+        *slot = None; // stop a previous one before starting over
+        self.activity.lock().expect("activity lock").clear();
+        *slot = system_source().map(|source| {
+            ActivityTracker::start(
+                source,
+                Arc::clone(&self.activity),
+                Arc::clone(&self.detect_game),
+                SAMPLE_INTERVAL,
+            )
+        });
+    }
+
+    /// The game of a clip of the last `seconds`: the application that was in
+    /// front for most of that time (never ClipForge itself or the desktop).
+    /// `None` when detection is off or nothing stood out.
+    pub fn detected_game(&self, seconds: u64) -> Option<String> {
+        if !self.detect_game.load(Ordering::Relaxed) {
+            return None;
+        }
+        let window = Duration::from_secs(seconds);
+        self.activity
+            .lock()
+            .expect("activity lock")
+            // To name a clip an application must hold the screen for at least
+            // a fifth of it: a glance at something else doesn't count.
+            .dominant(Instant::now(), window, window / 5, default_ignore)
+            .map(|app| app.name)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -162,6 +214,9 @@ impl Recorder {
     pub fn stop(&self) {
         // The engine detaches the microphone itself; forget our side of it.
         self.engine.lock().expect("engine lock").stop();
+        // Stop looking; what was seen stays, so a clip saved right after
+        // stopping still gets its game.
+        *self.tracker.lock().expect("tracker lock") = None;
         *self.mic.lock().expect("mic lock") = MicRuntime::default();
         self.record_start_result(&Ok(())); // a deliberate stop isn't an error
     }
@@ -192,10 +247,13 @@ impl Recorder {
 
     /// Volume and mute only: atomics, instant, safe from any thread.
     pub fn apply_live_controls(&self) {
-        let wanted = self.settings.get().microphone;
+        let settings = self.settings.get();
+        let wanted = settings.microphone;
         self.mic_controls
             .set_gain(gain_from_percent(wanted.gain_percent));
         self.mic_controls.set_muted(wanted.muted);
+        self.detect_game
+            .store(settings.library.detect_game, Ordering::Relaxed);
     }
 
     fn detach_microphone(&self) {
@@ -391,6 +449,80 @@ mod tests {
         recorder.apply_microphone();
         assert_eq!(recorder.mic_controls.gain(), 0.3);
         assert!(!recorder.mic_controls.muted());
+    }
+
+    /// Record that these applications were in front, each one starting this
+    /// many seconds ago (oldest first).
+    fn saw(recorder: &Recorder, history: &[(u64, &str)]) {
+        use clipforge_core::activity::AppInfo;
+        let now = Instant::now();
+        let mut log = recorder.activity.lock().unwrap();
+        for (ago, id) in history {
+            log.record(
+                now - Duration::from_secs(*ago),
+                Some(AppInfo {
+                    id: id.to_lowercase(),
+                    name: id.to_string(),
+                }),
+            );
+        }
+    }
+
+    #[test]
+    fn a_clip_is_named_after_the_application_that_held_the_screen() {
+        let recorder = recorder();
+        saw(&recorder, &[(28, "Valorant"), (4, "Discord")]);
+        assert_eq!(recorder.detected_game(30).as_deref(), Some("Valorant"));
+        // A shorter clip is only about the last few seconds.
+        assert_eq!(recorder.detected_game(3).as_deref(), Some("Discord"));
+    }
+
+    #[test]
+    fn clipforge_itself_is_never_the_game() {
+        let recorder = recorder();
+        saw(&recorder, &[(28, "Valorant"), (15, "com.clipforge.app")]);
+        // 13 s of the game and 15 s of ClipForge: only the game counts.
+        assert_eq!(recorder.detected_game(30).as_deref(), Some("Valorant"));
+
+        let only_ours = self::recorder();
+        saw(&only_ours, &[(28, "com.clipforge.app")]);
+        assert_eq!(only_ours.detected_game(30), None);
+    }
+
+    #[test]
+    fn a_quick_glance_elsewhere_does_not_name_the_clip() {
+        let recorder = recorder();
+        saw(&recorder, &[(30, "Game"), (2, "Browser")]);
+        assert_eq!(recorder.detected_game(30).as_deref(), Some("Game"));
+        let glance_only = self::recorder();
+        saw(&glance_only, &[(2, "Browser")]);
+        assert_eq!(glance_only.detected_game(30), None);
+    }
+
+    #[test]
+    fn nothing_seen_means_no_game() {
+        assert_eq!(recorder().detected_game(30), None);
+    }
+
+    #[test]
+    fn game_detection_follows_the_setting_live() {
+        let mut off = Settings::default();
+        off.library.detect_game = false;
+        let recorder = recorder_with(off);
+        saw(&recorder, &[(20, "Game")]);
+        assert_eq!(recorder.detected_game(30), None, "off from the start");
+
+        let mut on = Settings::default();
+        on.library.detect_game = true;
+        recorder.settings.replace(on).unwrap();
+        recorder.apply_live_controls();
+        assert_eq!(recorder.detected_game(30).as_deref(), Some("Game"));
+
+        let mut off = Settings::default();
+        off.library.detect_game = false;
+        recorder.settings.replace(off).unwrap();
+        recorder.apply_live_controls();
+        assert_eq!(recorder.detected_game(30), None);
     }
 
     #[test]

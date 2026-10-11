@@ -570,3 +570,58 @@ describe("the level meter", () => {
     view.onHide();
   });
 });
+
+describe("the library section", () => {
+  const detectSwitch = () =>
+    q<HTMLInputElement>('input[aria-label="Detectar el juego al guardar un clip"]');
+  const libraryPanel = () => q<HTMLElement>('[aria-labelledby="library-title"]');
+
+  function libSettings(detectGame: boolean): Settings {
+    const s = defaultSettings();
+    return { ...s, library: { detectGame } };
+  }
+
+  it("shows game detection on by default", async () => {
+    await mount();
+    expect(detectSwitch().checked).toBe(true);
+  });
+
+  it("shows what was saved", async () => {
+    await mount(libSettings(false));
+    expect(detectSwitch().checked).toBe(false);
+  });
+
+  it("switching it off saves at once and changes nothing else", async () => {
+    await mount();
+    detectSwitch().checked = false;
+    detectSwitch().dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    const saved = lastSaved();
+    expect(saved.library.detectGame).toBe(false);
+    expect(saved.microphone).toEqual(defaultSettings().microphone);
+    expect(saved.shortcuts).toEqual(defaultSettings().shortcuts);
+  });
+
+  it("switching it back on saves that too", async () => {
+    await mount(libSettings(false));
+    detectSwitch().checked = true;
+    detectSwitch().dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(lastSaved().library.detectGame).toBe(true);
+  });
+
+  it("follows a change made elsewhere", async () => {
+    await mount();
+    listeners.settings.forEach((cb) => cb(libSettings(false)));
+    await settle();
+    expect(detectSwitch().checked).toBe(false);
+  });
+
+  it("says what is recorded and that it stays on this computer", async () => {
+    await mount();
+    const text = libraryPanel().textContent!;
+    expect(text).toContain("nombre de la aplicación");
+    expect(text).toContain("esta computadora");
+  });
+});

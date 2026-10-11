@@ -1,11 +1,13 @@
 import * as api from "../api";
 import { validateClipName } from "../lib/clipname";
 import { clipTitle, type ClipInfo } from "../lib/clips";
+import { gameKey, gameOptions } from "../lib/filter";
 import { folderColor, foldersOf, type FolderInfo } from "../lib/folders";
 import { formatBytes, formatDuration, formatRelativeTime } from "../lib/format";
 import { h, svg } from "./dom";
 import { openEditor } from "./editor";
 import { openFolderPicker } from "./folderpicker";
+import { openGameDialog } from "./gamedialog";
 import { icons } from "./icons";
 import { confirmDialog } from "./modal";
 import { openPlayer } from "./player";
@@ -44,6 +46,8 @@ export function actionButton(action: ClipAction): HTMLElement {
 export interface ClipCardsOptions {
   /** The folders that exist now, for the labels under each clip. */
   folders: () => FolderInfo[];
+  /** Every clip in the library, for the games the game dialog suggests. */
+  allClips: () => readonly ClipInfo[];
   /** Reload the view after an action changed something. */
   refresh: () => Promise<void>;
   isFresh?: (name: string) => boolean;
@@ -52,7 +56,14 @@ export interface ClipCardsOptions {
 }
 
 export interface ClipCards {
+  /**
+   * The card of a clip. A card is built once and handed out again for as long
+   * as nothing it shows has changed, so filtering or re-rendering a view
+   * doesn't reload every thumbnail.
+   */
   card(clip: ClipInfo, options?: { draggable?: boolean }): HTMLElement;
+  /** Forget the cards of clips that are no longer in `names`. */
+  prune(names: Iterable<string>): void;
   /** A rename box is open: the view must not rebuild its cards under it. */
   isRenaming(): boolean;
 }
@@ -65,6 +76,7 @@ export interface ClipCards {
  */
 export function createClipCards(options: ClipCardsOptions): ClipCards {
   let renaming = false;
+  const cache = new Map<string, { signature: string; el: HTMLElement; video: HTMLVideoElement }>();
 
   const lazyVideos = new IntersectionObserver(
     (entries) => {
@@ -131,6 +143,7 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
     const finish = async (commit: boolean) => {
       if (finished) return;
       finished = true;
+      forget(clip.name); // the card holds the input: it has to be built again
       if (commit && input.value.trim() !== clipTitle(clip.name)) {
         const check = validateClipName(input.value);
         if (!check.ok) {
@@ -155,7 +168,43 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
     input.select();
   }
 
+  function forget(name: string): void {
+    const entry = cache.get(name);
+    if (entry) lazyVideos.unobserve(entry.video);
+    cache.delete(name);
+  }
+
+  /** Everything a card shows: when it is the same, the card is too. */
+  function signature(clip: ClipInfo, draggable: boolean): string {
+    return [
+      clip.path,
+      clip.sizeBytes,
+      clip.modifiedMs,
+      clip.game ?? "",
+      foldersOf(clip, options.folders())
+        .map((f) => `${f.id}:${f.name}:${f.color}`)
+        .join(","),
+      options.isFresh?.(clip.name) ? "fresh" : "",
+      draggable ? "drag" : "",
+      options.extraActions?.(clip).map((a) => a.label).join(",") ?? "",
+      Math.floor(Date.now() / 60_000), // "hace 5 min" goes stale
+    ].join("|");
+  }
+
   function card(clip: ClipInfo, cardOptions: { draggable?: boolean } = {}): HTMLElement {
+    const signature_ = signature(clip, cardOptions.draggable === true);
+    const cached = cache.get(clip.name);
+    if (cached?.signature === signature_) return cached.el;
+    forget(clip.name);
+    const built = build(clip, cardOptions);
+    cache.set(clip.name, { signature: signature_, ...built });
+    return built.el;
+  }
+
+  function build(
+    clip: ClipInfo,
+    cardOptions: { draggable?: boolean },
+  ): { el: HTMLElement; video: HTMLVideoElement } {
     const duration = h("span", { class: "badge" }, "–:––");
     const video = h("video", {
       class: "thumb-video",
@@ -212,7 +261,23 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
         h(
           "div",
           { class: "card-meta" },
-          `${formatRelativeTime(clip.modifiedMs, Date.now())} · ${formatBytes(clip.sizeBytes)}`,
+          h(
+            "button",
+            {
+              class: `game-link ${clip.game === null ? "game-none" : ""}`,
+              title: clip.game === null ? "Decir de qué juego es este clip" : "Cambiar el juego de este clip",
+              onclick: (e: Event) => {
+                e.stopPropagation();
+                editGame(clip);
+              },
+            },
+            clip.game ?? "Sin juego",
+          ),
+          h(
+            "span",
+            { class: "card-meta-rest" },
+            ` · ${formatRelativeTime(clip.modifiedMs, Date.now())} · ${formatBytes(clip.sizeBytes)}`,
+          ),
         ),
         chips(clip),
       ),
@@ -238,8 +303,26 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
       });
       el.addEventListener("dragend", () => el.classList.remove("dragging"));
     }
-    return el;
+    return { el, video };
   }
 
-  return { card, isRenaming: () => renaming };
+  function editGame(clip: ClipInfo): void {
+    const clips = options.allClips();
+    openGameDialog({
+      clip,
+      games: gameOptions(clips).games.map((g) => g.name),
+      clipsOfGame: (game) =>
+        clips.filter((c) => c.game !== null && gameKey(c.game) === gameKey(game)).length,
+      onSaved: () => void options.refresh(),
+    });
+  }
+
+  return {
+    card,
+    prune(names) {
+      const keep = new Set(names);
+      for (const name of [...cache.keys()]) if (!keep.has(name)) forget(name);
+    },
+    isRenaming: () => renaming,
+  };
 }

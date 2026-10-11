@@ -17,10 +17,19 @@ export interface ShortcutSettings {
   saveClip: string;
 }
 
+export interface LibrarySettings {
+  /**
+   * Tag each saved clip with the application that was in front while it was
+   * recorded (its game). Only the application's name, kept on this machine.
+   */
+  detectGame: boolean;
+}
+
 export interface Settings {
   version: number;
   shortcuts: ShortcutSettings;
   microphone: MicrophoneSettings;
+  library: LibrarySettings;
 }
 
 export interface MicStatus {
@@ -56,6 +65,7 @@ export function defaultSettings(): Settings {
       muted: false,
       muteShortcut: DEFAULT_MUTE_SHORTCUT,
     },
+    library: { detectGame: true },
   };
 }
 
@@ -93,6 +103,11 @@ export function withMicrophone(
 /** A copy of `settings` with the shortcuts section patched. */
 export function withShortcuts(settings: Settings, patch: Partial<ShortcutSettings>): Settings {
   return { ...settings, shortcuts: { ...settings.shortcuts, ...patch } };
+}
+
+/** A copy of `settings` with the library section patched. */
+export function withLibrary(settings: Settings, patch: Partial<LibrarySettings>): Settings {
+  return { ...settings, library: { ...settings.library, ...patch } };
 }
 
 export const MIC_MODE_LABEL: Record<MicMode, string> = {

@@ -81,12 +81,29 @@ impl Default for ShortcutSettings {
     }
 }
 
+/// How the library learns about a clip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LibrarySettings {
+    /// Tag each saved clip with the application that was in front while it was
+    /// recorded (its "game"). Only the application's name is kept, on this
+    /// machine; on by default, switchable off.
+    pub detect_game: bool,
+}
+
+impl Default for LibrarySettings {
+    fn default() -> Self {
+        Self { detect_game: true }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub version: u32,
     pub shortcuts: ShortcutSettings,
     pub microphone: MicrophoneSettings,
+    pub library: LibrarySettings,
 }
 
 impl Default for Settings {
@@ -95,6 +112,7 @@ impl Default for Settings {
             version: SETTINGS_VERSION,
             shortcuts: ShortcutSettings::default(),
             microphone: MicrophoneSettings::default(),
+            library: LibrarySettings::default(),
         }
     }
 }
@@ -291,6 +309,29 @@ mod tests {
         assert_eq!(s.microphone.gain_percent, 100);
         assert!(!s.microphone.muted);
         assert_eq!(s.microphone.device_id, None);
+        assert!(
+            s.library.detect_game,
+            "game detection is on unless switched off"
+        );
+    }
+
+    #[test]
+    fn a_file_from_before_the_library_section_gets_its_default() {
+        let dir = TempDir::new("no-library-section");
+        fs::write(dir.file(), r#"{"microphone":{"enabled":true}}"#).unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert!(s.microphone.enabled);
+        assert!(s.library.detect_game);
+    }
+
+    #[test]
+    fn game_detection_can_be_switched_off_and_stays_off() {
+        let dir = TempDir::new("detect-off");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.library.detect_game = false;
+        store.replace(s.validated().unwrap()).unwrap();
+        assert!(!SettingsStore::load(dir.file()).get().library.detect_game);
     }
 
     #[test]
@@ -591,6 +632,7 @@ mod tests {
         assert!(json["microphone"]["deviceId"].is_null());
         assert_eq!(json["microphone"]["mode"], "mixed");
         assert_eq!(json["shortcuts"]["saveClip"], "CommandOrControl+Shift+S");
+        assert_eq!(json["library"]["detectGame"], true);
     }
 
     #[test]

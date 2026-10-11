@@ -535,6 +535,7 @@ dependencies = [
  "chrono",
  "cpal",
  "mp4",
+ "objc2-app-kit",
  "screencapturekit",
  "symphonia",
  "thiserror 2.0.18",

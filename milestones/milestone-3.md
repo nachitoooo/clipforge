@@ -45,6 +45,28 @@ app settings.
 - [ ] Windows: drag and drop with `dragDropEnabled: false` (WebView2), never run
 - [ ] Manual check in the app: make folders, file clips both ways, rename / edit / delete (both outcomes), trim a clip that is in a folder
 
+## F-3.10 — Smart library
+> **Progress (2026-10-11, branch `feat/3/smart-library`):** implemented; design in
+> [`docs/library.md`](../docs/library.md) (section "Smart library"). Each clip is
+> tagged with the application that held the screen while it was recorded (its
+> game); Recientes, the Biblioteca and every folder can be searched, filtered and
+> sorted. The tags of Medal's "biblioteca inteligente" are the folders. The UI
+> boxes stay open until someone checks them in the running Tauri window: they are
+> covered by simulated-DOM tests and were driven in headless Chrome against a mock
+> backend, never in the real webview. What comes next is planned in
+> [`docs/medal-roadmap.md`](../docs/medal-roadmap.md).
+- [x] Foreground-application lookup and activity log (`core/src/activity/`): the application that held the screen longest over a clip's span, ignoring ClipForge and the desktop shells; a tracker thread that stops promptly and forgets when switched off
+  — unit tests with a fake source; verified 2026-10-11 against the real macOS session (`macos_activity`, ignored test)
+- [x] Per-clip facts in `clipmeta.json` (game), keyed by file name, reads never write or prune, all-or-nothing writes; renaming, deleting or trimming a clip keeps them in step; folders and clip facts share one `JsonStore`
+  — Rust unit tests; the Tauri command wiring in `lib.rs` has only been compiled
+- [x] Game detection is a setting (`library.detectGame`, on by default), applied live
+- [ ] Filter bar over Recientes, the Biblioteca root (results over every clip, matching folders) and inside a folder: search (title, game, folder names), game, folder, date, order; "N de M clips"; clear; the focus stays in the search box while the list reloads
+- [ ] Each card names its game; clicking it opens «Juego del clip» to correct it for one clip or for every clip of that game
+- [ ] Thumbnails are not reloaded while typing in the search box (cards are kept between renders)
+- [ ] Settings → Biblioteca: the switch and its privacy note
+- [ ] Windows: the foreground-window lookup (`activity/windows.rs`) is compiled and linted by the CI cross-check but never run (F-2.4 is open)
+- [ ] Manual check in the app with a real game: play, save a clip with the hotkey, the tray and the button, see the game on the card; alt-tab to another app mid-clip
+
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented
 > and verified by tests (see below). Open boxes are things only a person at the
