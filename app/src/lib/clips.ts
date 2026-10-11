@@ -6,6 +6,8 @@ export interface ClipInfo {
   modifiedMs: number;
   /** Ids of the library folders the clip is filed in. */
   folders: string[];
+  /** The game (application) it was recorded in; null when unknown. */
+  game: string | null;
 }
 
 export interface ClipGroup {

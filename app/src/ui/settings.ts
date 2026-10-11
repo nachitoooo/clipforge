@@ -12,7 +12,9 @@ import {
   formatGain,
   micStateSummary,
   withMicrophone,
+  withLibrary,
   withShortcuts,
+  type LibrarySettings,
   type MicDevice,
   type MicMode,
   type MicStatus,
@@ -176,6 +178,35 @@ export function createSettings(root: HTMLElement): SettingsView {
     ),
   );
 
+  // ---- library panel ----------------------------------------------------
+
+  const detectSwitch = switchControl("Detectar el juego al guardar un clip", (checked) =>
+    changeLibrary({ detectGame: checked }),
+  );
+  const libraryPanel = h(
+    "section",
+    { class: "panel", "aria-labelledby": "library-title" },
+    h(
+      "div",
+      { class: "panel-head" },
+      h(
+        "div",
+        { class: "panel-title" },
+        svg(icons.library),
+        h("h2", { id: "library-title" }, "Biblioteca"),
+      ),
+    ),
+    h(
+      "div",
+      { class: "panel-body" },
+      row(
+        "Detectar el juego al guardar un clip",
+        "Anota qué aplicación estaba en primer plano mientras se grababa, para buscar y filtrar tus clips por juego. Solo guarda el nombre de la aplicación, no lo que se ve en pantalla, y se queda en esta computadora. Los clips que ya tenés no cambian; el juego de cada uno se puede corregir a mano.",
+        detectSwitch.el,
+      ),
+    ),
+  );
+
   const optionsBody = h(
     "div",
     { class: "panel-body" },
@@ -242,7 +273,7 @@ export function createSettings(root: HTMLElement): SettingsView {
       { class: "view-header" },
       h("div", {}, h("h1", {}, "Configuración"), h("p", { class: "muted" }, "Cambios con efecto inmediato")),
     ),
-    h("div", { class: "view-body" }, h("div", { class: "settings" }, shortcutsPanel, panel)),
+    h("div", { class: "view-body" }, h("div", { class: "settings" }, shortcutsPanel, panel, libraryPanel)),
   );
 
   // ---- rendering from state --------------------------------------------
@@ -318,6 +349,7 @@ export function createSettings(root: HTMLElement): SettingsView {
     muteRecorder.render();
     saveRecorder.render();
     resetSaveShortcut.hidden = settings.shortcuts.saveClip === DEFAULT_SAVE_SHORTCUT;
+    detectSwitch.input.checked = settings.library.detectGame;
     meterHint.textContent = !mic.enabled
       ? ""
       : mic.muted
@@ -334,6 +366,10 @@ export function createSettings(root: HTMLElement): SettingsView {
 
   function changeShortcuts(patch: Partial<ShortcutSettings>): void {
     update(withShortcuts(settings, patch), false);
+  }
+
+  function changeLibrary(patch: Partial<LibrarySettings>): void {
+    update(withLibrary(settings, patch), false);
   }
 
   function update(next: Settings, debounce: boolean): void {

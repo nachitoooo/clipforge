@@ -26,6 +26,7 @@ const clip = (folders: string[]): ClipInfo => ({
   sizeBytes: 1,
   modifiedMs: 0,
   folders,
+  game: null,
 });
 
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));

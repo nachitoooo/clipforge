@@ -22,6 +22,7 @@ const clip: ClipInfo = {
   sizeBytes: 5_000_000,
   modifiedMs: 0,
   folders: [],
+  game: null,
 };
 
 const info = (audioTracks: number): EditorClip => ({

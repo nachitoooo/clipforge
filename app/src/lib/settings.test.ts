@@ -7,6 +7,7 @@ import {
   formatGain,
   gainToDb,
   micStateSummary,
+  withLibrary,
   withMicrophone,
   withShortcuts,
   type MicStatus,
@@ -64,6 +65,19 @@ describe("settings helpers", () => {
     expect(next.shortcuts.saveClip).toBe("Alt+F9");
     expect(next.microphone).toBe(original.microphone);
     expect(original.shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
+  });
+
+  it("game detection is on by default", () => {
+    expect(defaultSettings().library.detectGame).toBe(true);
+  });
+
+  it("patches the library section without touching the rest or the original", () => {
+    const original = defaultSettings();
+    const next = withLibrary(original, { detectGame: false });
+    expect(next.library.detectGame).toBe(false);
+    expect(next.microphone).toBe(original.microphone);
+    expect(next.shortcuts).toBe(original.shortcuts);
+    expect(original.library.detectGame).toBe(true);
   });
 
   it("patches the microphone without mutating the original", () => {

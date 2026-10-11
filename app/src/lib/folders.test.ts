@@ -33,6 +33,7 @@ const clip = (name: string, folders: string[] = []): ClipInfo => ({
   sizeBytes: 1,
   modifiedMs: 0,
   folders,
+  game: null,
 });
 
 describe("validateFolderName", () => {

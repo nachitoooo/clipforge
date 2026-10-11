@@ -11,6 +11,7 @@ const clip = (name: string, modifiedMs: number): ClipInfo => ({
   sizeBytes: 1,
   modifiedMs,
   folders: [],
+  game: null,
 });
 
 describe("clipTitle", () => {

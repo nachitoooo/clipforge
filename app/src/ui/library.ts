@@ -1,5 +1,6 @@
 import * as api from "../api";
 import { clipCountLabel, clipTitle, groupByDay, type ClipInfo } from "../lib/clips";
+import { applyFilter, isFiltering, layoutFor, normalizeText } from "../lib/filter";
 import {
   clipsIn,
   deleteBreakdown,
@@ -13,6 +14,7 @@ import {
 import { formatBytes } from "../lib/format";
 import { CLIP_DRAG_TYPE, actionButton, createClipCards } from "./clipcard";
 import { h, svg } from "./dom";
+import { createFilterBar, type FilterBar } from "./filterbar";
 import { openFolderDialog } from "./folderdialog";
 import { folderIcons, icons } from "./icons";
 import { choiceDialog, confirmDialog } from "./modal";
@@ -52,6 +54,7 @@ export function createLibrary(root: HTMLElement): Library {
 
   const cards = createClipCards({
     folders: () => folders,
+    allClips: () => clips,
     refresh: () => refresh(),
     isFresh: (name) => fresh.has(name),
     extraActions: (clip) =>
@@ -67,6 +70,14 @@ export function createLibrary(root: HTMLElement): Library {
   });
 
   const folderById = (id: string) => folders.find((f) => f.id === id);
+
+  // One filter bar at the root (it can also pick a folder) and one inside a
+  // folder (where the folder is already chosen). Each keeps its own filter.
+  const rootBar = createFilterBar({ onChange: () => renderBody(), folderSelector: true });
+  const folderBar = createFilterBar({ onChange: () => renderBody() });
+  /** What is on screen, so a filter change only has to redo the list. */
+  let current: { bar: FilterBar | null; body: () => HTMLElement } | null = null;
+  let bodyEl: HTMLElement | null = null;
 
   // ---- folder actions ---------------------------------------------------
 
@@ -235,6 +246,7 @@ export function createLibrary(root: HTMLElement): Library {
 
     const open = () => {
       openId = folder.id;
+      folderBar.reset(); // each visit to a folder starts unfiltered
       render();
     };
     el.addEventListener("click", open);
@@ -270,7 +282,39 @@ export function createLibrary(root: HTMLElement): Library {
 
   // ---- views ------------------------------------------------------------
 
-  function rootView(): HTMLElement[] {
+  const grid = (clips: ClipInfo[], draggable = false) =>
+    h("div", { class: "grid" }, ...clips.map((clip) => cards.card(clip, { draggable })));
+
+  /** Clips under their days, or in one list when the order isn't by date. */
+  function clipSections(shown: ClipInfo[], sort: Parameters<typeof layoutFor>[0]): HTMLElement[] {
+    if (layoutFor(sort) === "flat") return [h("section", { class: "group" }, grid(shown))];
+    return groupByDay(shown, Date.now()).map((group) =>
+      h("section", { class: "group" }, h("h2", { class: "group-title" }, group.label), grid(group.clips)),
+    );
+  }
+
+  function noMatches(bar: FilterBar): HTMLElement {
+    return h(
+      "div",
+      { class: "empty" },
+      svg(icons.search, "icon empty-icon"),
+      h("h2", {}, "Ningún clip coincide"),
+      h("p", { class: "muted" }, "Probá con otras palabras o sacá algún filtro."),
+      h(
+        "button",
+        {
+          class: "btn",
+          onclick: () => {
+            bar.reset();
+            renderBody();
+          },
+        },
+        "Limpiar filtros",
+      ),
+    );
+  }
+
+  function rootParts() {
     const header = h(
       "header",
       { class: "view-header" },
@@ -298,67 +342,107 @@ export function createLibrary(root: HTMLElement): Library {
       ),
     );
 
-    const body = h("div", { class: "view-body" });
-    if (!loaded) return [header, body];
+    const body = (): HTMLElement => {
+      const body = h("div", { class: "view-body" });
+      if (!loaded) return body;
+      const filter = rootBar.get();
+      rootBar.setCount(applyFilter(clips, folders, filter, Date.now()).length, clips.length);
 
-    const folderSection = h("section", { class: "group", "data-section": "folders" });
-    folderSection.append(h("h2", { class: "group-title" }, "Carpetas"));
-    if (folders.length === 0) {
-      folderSection.append(
-        h(
-          "div",
-          { class: "empty-inline" },
-          svg(icons.folderPlus, "icon empty-icon"),
-          h(
-            "p",
-            { class: "muted" },
-            "Todavía no armaste carpetas. Hacé una por juego, por tanda de partidas o para tus mejores jugadas, y metele los clips que quieras: un clip puede estar en varias a la vez.",
-          ),
-          h(
-            "button",
-            { class: "btn btn-primary", onclick: () => void newFolder() },
-            svg(icons.folderPlus),
-            "Crear la primera carpeta",
-          ),
-        ),
-      );
-    } else {
-      folderSection.append(h("div", { class: "grid" }, ...sortFolders(folders).map(folderCard)));
-    }
-    body.append(folderSection);
+      // Searching or filtering turns the Biblioteca into a list of results over
+      // every clip, folders or not, plus the folders whose name matches.
+      if (isFiltering(filter)) {
+        const results = applyFilter(clips, folders, filter, Date.now());
+        const words = normalizeText(filter.query).split(/\s+/).filter(Boolean);
+        const onlySearching = filter.game === null && filter.folder === null && filter.range === "all";
+        const matching =
+          onlySearching && words.length > 0
+            ? sortFolders(folders).filter((f) => words.every((w) => normalizeText(f.name).includes(w)))
+            : [];
+        if (matching.length > 0) {
+          body.append(
+            h(
+              "section",
+              { class: "group", "data-section": "folders" },
+              h("h2", { class: "group-title" }, "Carpetas"),
+              h("div", { class: "grid" }, ...matching.map(folderCard)),
+            ),
+          );
+        }
+        if (results.length > 0) {
+          body.append(
+            h(
+              "section",
+              { class: "group", "data-section": "results" },
+              h("h2", { class: "group-title" }, `Clips · ${results.length}`),
+              grid(results),
+            ),
+          );
+        } else if (matching.length === 0) {
+          body.append(noMatches(rootBar));
+        }
+        return body;
+      }
 
-    const loose = looseClips(clips);
-    const looseSection = h("section", { class: "group", "data-section": "loose" });
-    looseSection.append(h("h2", { class: "group-title" }, `Sin carpeta · ${loose.length}`));
-    if (loose.length > 0) {
-      if (folders.length > 0) {
+      const folderSection = h("section", { class: "group", "data-section": "folders" });
+      folderSection.append(h("h2", { class: "group-title" }, "Carpetas"));
+      if (folders.length === 0) {
+        folderSection.append(
+          h(
+            "div",
+            { class: "empty-inline" },
+            svg(icons.folderPlus, "icon empty-icon"),
+            h(
+              "p",
+              { class: "muted" },
+              "Todavía no armaste carpetas. Hacé una por juego, por tanda de partidas o para tus mejores jugadas, y metele los clips que quieras: un clip puede estar en varias a la vez.",
+            ),
+            h(
+              "button",
+              { class: "btn btn-primary", onclick: () => void newFolder() },
+              svg(icons.folderPlus),
+              "Crear la primera carpeta",
+            ),
+          ),
+        );
+      } else {
+        folderSection.append(h("div", { class: "grid" }, ...sortFolders(folders).map(folderCard)));
+      }
+      body.append(folderSection);
+
+      const loose = applyFilter(looseClips(clips), folders, filter, Date.now()); // sorted
+      const looseSection = h("section", { class: "group", "data-section": "loose" });
+      looseSection.append(h("h2", { class: "group-title" }, `Sin carpeta · ${loose.length}`));
+      if (loose.length > 0) {
+        if (folders.length > 0) {
+          looseSection.append(
+            h(
+              "p",
+              { class: "muted hint" },
+              "Arrastrá un clip sobre una carpeta para agregarlo, o usá el botón de carpetas de cada clip.",
+            ),
+          );
+        }
+        looseSection.append(grid(loose, true));
+      } else {
         looseSection.append(
           h(
             "p",
-            { class: "muted hint" },
-            "Arrastrá un clip sobre una carpeta para agregarlo, o usá el botón de carpetas de cada clip.",
+            { class: "muted" },
+            clips.length === 0
+              ? "Todavía no hay clips. Cuando guardes uno aparece acá."
+              : "Todos tus clips están en alguna carpeta.",
           ),
         );
       }
-      looseSection.append(
-        h("div", { class: "grid" }, ...loose.map((clip) => cards.card(clip, { draggable: true }))),
-      );
-    } else {
-      looseSection.append(
-        h(
-          "p",
-          { class: "muted" },
-          clips.length === 0
-            ? "Todavía no hay clips. Cuando guardes uno aparece acá."
-            : "Todos tus clips están en alguna carpeta.",
-        ),
-      );
-    }
-    body.append(looseSection);
-    return [header, body];
+      body.append(looseSection);
+      return body;
+    };
+
+    rootBar.setData({ clips, folders });
+    return { header, bar: clips.length > 0 ? rootBar : null, body };
   }
 
-  function folderView(folder: FolderInfo): HTMLElement[] {
+  function folderParts(folder: FolderInfo) {
     const inside = clipsIn(clips, folder.id);
     const header = h(
       "header",
@@ -408,40 +492,56 @@ export function createLibrary(root: HTMLElement): Library {
       ),
     );
 
-    const body = h("div", { class: "view-body" });
-    if (inside.length === 0) {
-      body.append(
-        h(
-          "div",
-          { class: "empty" },
-          svg(folderIcons[folderIconId(folder.icon)], "icon empty-icon"),
-          h("h2", {}, "Esta carpeta está vacía"),
-          h(
-            "p",
-            { class: "muted" },
-            "Agregale clips con el botón de carpetas que aparece al pasar el mouse sobre un clip (en Recientes o en «Sin carpeta»), o arrastrándolos sobre la carpeta desde la Biblioteca.",
-          ),
-        ),
-      );
-    } else {
-      for (const group of groupByDay(inside, Date.now())) {
+    const body = (): HTMLElement => {
+      const body = h("div", { class: "view-body" });
+      if (inside.length === 0) {
         body.append(
           h(
-            "section",
-            { class: "group" },
-            h("h2", { class: "group-title" }, group.label),
-            h("div", { class: "grid" }, ...group.clips.map((clip) => cards.card(clip))),
+            "div",
+            { class: "empty" },
+            svg(folderIcons[folderIconId(folder.icon)], "icon empty-icon"),
+            h("h2", {}, "Esta carpeta está vacía"),
+            h(
+              "p",
+              { class: "muted" },
+              "Agregale clips con el botón de carpetas que aparece al pasar el mouse sobre un clip (en Recientes o en «Sin carpeta»), o arrastrándolos sobre la carpeta desde la Biblioteca.",
+            ),
           ),
         );
+        return body;
       }
-    }
-    return [header, body];
+      const filter = folderBar.get();
+      const shown = applyFilter(inside, folders, filter, Date.now());
+      folderBar.setCount(shown.length, inside.length);
+      if (shown.length === 0) body.append(noMatches(folderBar));
+      else body.append(...clipSections(shown, filter.sort));
+      return body;
+    };
+
+    folderBar.setData({ clips: inside, folders });
+    return { header, bar: inside.length > 0 ? folderBar : null, body };
   }
 
   function render(): void {
     const folder = openId === null ? undefined : folderById(openId);
     if (openId !== null && !folder) openId = null;
-    root.replaceChildren(...(folder ? folderView(folder) : rootView()));
+    cards.prune(clips.map((c) => c.name));
+    const parts = folder ? folderParts(folder) : rootParts();
+    current = parts;
+    bodyEl = parts.body();
+    // Redoing the view must not take the focus out of the search box.
+    const keeper = parts.bar ?? rootBar;
+    keeper.keepFocus(() =>
+      root.replaceChildren(...(parts.bar ? [parts.header, parts.bar.el, bodyEl!] : [parts.header, bodyEl!])),
+    );
+  }
+
+  /** The filter changed: only the list under the bar is redone. */
+  function renderBody(): void {
+    if (!current || !bodyEl) return;
+    const next = current.body();
+    bodyEl.replaceWith(next);
+    bodyEl = next;
   }
 
   async function refresh(): Promise<void> {

@@ -22,6 +22,7 @@ vi.mock("./editor", () => ({ openEditor: vi.fn() }));
 vi.mock("./player", () => ({ openPlayer: vi.fn() }));
 const picker = vi.hoisted(() => ({ openFolderPicker: vi.fn() }));
 vi.mock("./folderpicker", () => picker);
+vi.mock("./gamedialog", () => ({ openGameDialog: vi.fn() }));
 
 const clip = (n: number, folders: string[] = []): ClipInfo => ({
   name: `clip-${n}.mp4`,
@@ -29,6 +30,7 @@ const clip = (n: number, folders: string[] = []): ClipInfo => ({
   sizeBytes: 1_000_000 * n,
   modifiedMs: Date.now() - n * 1000,
   folders,
+  game: null,
 });
 
 const folder = (id: string, name: string, extra: Partial<FolderInfo> = {}): FolderInfo => ({
@@ -586,5 +588,156 @@ describe("dragging a clip onto a folder", () => {
     drag(folderCard("f1"), "drop");
     await settle();
     expect(toastText().join()).toContain("ya no existe");
+  });
+});
+
+describe("searching and filtering the Biblioteca", () => {
+  const folders = [
+    folder("f1", "Mejores jugadas", { clipCount: 2 }),
+    folder("f2", "Águilas", { clipCount: 1 }),
+  ];
+  const clips = [
+    { ...clip(1, ["f1"]), game: "Valorant", name: "Ace en Mirage.mp4" },
+    { ...clip(2, ["f1", "f2"]), game: "Valorant" },
+    { ...clip(3), game: "Fortnite" },
+    clip(4),
+  ];
+  const bar = () => q(".filterbar", root());
+  const search = () => q<HTMLInputElement>(".filterbar input", root())!;
+  const select = (label: string) => q<HTMLSelectElement>(`select[aria-label="${label}"]`, root());
+  const titles = (section?: string) =>
+    all(section ? `[data-section="${section}"] .card` : ".card", root()).map((c) => q(".card-title", c)!.textContent);
+
+  function type(text: string) {
+    search().value = text;
+    search().dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function choose(el: HTMLSelectElement | null, value: string) {
+    el!.value = value;
+    el!.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  it("has a bar when there are clips, and none in an empty library", async () => {
+    await open([], []);
+    expect(bar()).toBeNull();
+    await open(clips, folders);
+    expect(bar()).not.toBeNull();
+  });
+
+  it("without a filter it is the usual folders and 'Sin carpeta'", async () => {
+    await open(clips, folders);
+    expect(folderCards()).toHaveLength(2);
+    expect(titles("loose")).toEqual(["clip-3", "clip-4"]);
+  });
+
+  it("a search lists the matching clips from everywhere, folders or not", async () => {
+    await open(clips, folders);
+    type("valorant");
+    expect(root().querySelector('[data-section="loose"]')).toBeNull();
+    expect(titles("results")).toEqual(["Ace en Mirage", "clip-2"]); // newest first
+    expect(root().textContent).toContain("Clips · 2");
+    expect(root().querySelector(".filter-status")!.textContent).toBe("2 de 4 clips");
+  });
+
+  it("finds a clip by the name of one of its folders", async () => {
+    await open(clips, folders);
+    type("aguilas");
+    expect(titles("results")).toEqual(["clip-2"]);
+  });
+
+  it("shows the folders whose name matches above the clips", async () => {
+    await open(clips, folders);
+    type("mejores");
+    expect(folderCards().map((c) => q(".card-title", c)!.textContent)).toEqual(["Mejores jugadas"]);
+    expect(titles("results")).toEqual(["Ace en Mirage", "clip-2"]); // the clips filed in it
+  });
+
+  it("does not list folders when the search is narrowed by game, folder or date", async () => {
+    await open(clips, folders);
+    type("mejores");
+    choose(select("Juego"), "valorant");
+    expect(folderCards()).toHaveLength(0);
+  });
+
+  it("filters by game and by folder", async () => {
+    await open(clips, folders);
+    choose(select("Juego"), "fortnite");
+    expect(titles("results")).toEqual(["clip-3"]);
+    choose(select("Juego"), "");
+    choose(select("Carpeta"), "f2");
+    expect(titles("results")).toEqual(["clip-2"]);
+  });
+
+  it("an order sorts the clips without a folder too", async () => {
+    await open(clips, folders);
+    choose(select("Ordenar por"), "size"); // clip-4 is the heaviest loose one
+    expect(titles("loose")).toEqual(["clip-4", "clip-3"]);
+    expect(root().querySelector('[data-section="loose"]')).not.toBeNull(); // an order alone is not a filter
+  });
+
+  it("says nothing matches, and clearing brings the folders back", async () => {
+    await open(clips, folders);
+    type("zzz");
+    expect(q(".empty h2", root())!.textContent).toBe("Ningún clip coincide");
+    click(q(".empty .btn", root()));
+    expect(folderCards()).toHaveLength(2);
+    expect(search().value).toBe("");
+  });
+
+  it("filtered results can be played and edited like any card", async () => {
+    await open(clips, folders);
+    type("clip-3");
+    expect(action(q('[data-section="results"] .card', root())!, "Carpetas…")).not.toBeNull();
+  });
+
+  it("keeps the focus in the search box when the list reloads", async () => {
+    const library = await open(clips, folders);
+    search().focus();
+    type("valorant");
+    await library.refresh();
+    expect(search().value).toBe("valorant");
+    expect(document.activeElement).toBe(search());
+  });
+
+  describe("inside a folder", () => {
+    async function inside() {
+      await open(clips, folders);
+      click(folderCard("f1"));
+    }
+
+    it("has its own bar without the folder selector, over that folder's games", async () => {
+      await inside();
+      expect(bar()).not.toBeNull();
+      expect(select("Carpeta")).toBeNull();
+      expect([...select("Juego")!.options].map((o) => o.textContent)).toEqual(["Todos los juegos", "Valorant (2)"]);
+    });
+
+    it("filters only the clips of the folder", async () => {
+      await inside();
+      type("mirage");
+      expect(titles()).toEqual(["Ace en Mirage"]);
+      expect(root().querySelector(".filter-status")!.textContent).toBe("1 de 2 clips");
+      type("fortnite"); // exists, but not in this folder
+      expect(q(".empty h2", root())!.textContent).toBe("Ningún clip coincide");
+    });
+
+    it("each visit to a folder starts unfiltered, and the root keeps its own filter", async () => {
+      await open(clips, folders);
+      type("mejores"); // at the root: finds the folder of that name
+      click(folderCard("f1"));
+      expect(search().value).toBe("");
+      type("mirage");
+      click(q(".crumb", root()));
+      expect(search().value).toBe("mejores");
+      click(folderCard("f1"));
+      expect(search().value).toBe("");
+    });
+
+    it("an empty folder has no bar", async () => {
+      await open([clip(3)], [folder("f1", "Vacía")]);
+      click(folderCard("f1"));
+      expect(bar()).toBeNull();
+    });
   });
 });
