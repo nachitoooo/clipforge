@@ -16,15 +16,13 @@
 //! * Free of Tauri types so it is unit tested; the commands live in `lib.rs`.
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::library::ClipInfo;
-use crate::persist;
+use crate::persist::JsonStore;
 
 pub const INDEX_VERSION: u32 = 1;
 pub const MAX_NAME_CHARS: usize = 60;
@@ -192,48 +190,24 @@ fn now_ms() -> u64 {
 
 /// Loads, holds and saves the folder index.
 pub struct FolderStore {
-    path: PathBuf,
-    index: Mutex<Index>,
+    store: JsonStore<Index>,
 }
 
 impl FolderStore {
     /// Never fails: a missing file means no folders; an unreadable one is
     /// moved aside to `library.json.bak` (so nothing is lost) and starts empty.
     pub fn load(path: PathBuf) -> Self {
-        let index = match fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str::<Index>(&text)
-                .map(Index::repaired)
-                .unwrap_or_else(|e| {
-                    eprintln!("clipforge: library file unreadable ({e}); starting empty");
-                    persist::set_aside(&path);
-                    Index::default()
-                }),
-            Err(_) => Index::default(),
-        };
         Self {
-            path,
-            index: Mutex::new(index),
+            store: JsonStore::load(path, "la biblioteca", Index::repaired),
         }
     }
 
-    /// Apply `change` to a copy and keep it only if it is saved. A change
-    /// that turns out to be a no-op doesn't touch the disk.
     fn mutate<T>(&self, change: impl FnOnce(&mut Index) -> Result<T, String>) -> Result<T, String> {
-        let mut current = self.index.lock().expect("library lock");
-        let mut next = current.clone();
-        let out = change(&mut next)?;
-        if next != *current {
-            let json = serde_json::to_string_pretty(&next)
-                .map_err(|e| format!("no se pudo serializar la biblioteca: {e}"))?;
-            persist::write_atomic(&self.path, json.as_bytes())
-                .map_err(|e| format!("no se pudo guardar la biblioteca: {e}"))?;
-            *current = next;
-        }
-        Ok(out)
+        self.store.mutate(change)
     }
 
     fn read<T>(&self, view: impl FnOnce(&Index) -> T) -> T {
-        view(&self.index.lock().expect("library lock"))
+        self.store.read(view)
     }
 
     // ---- folders ----------------------------------------------------------
@@ -447,6 +421,7 @@ impl FolderStore {
 mod tests {
     use super::*;
     use crate::testutil::TempDir;
+    use std::fs;
 
     fn store(dir: &TempDir) -> FolderStore {
         FolderStore::load(dir.0.join("library.json"))
@@ -467,6 +442,7 @@ mod tests {
             size_bytes: size,
             modified_ms: 0,
             folders: Vec::new(),
+            game: None,
         }
     }
 

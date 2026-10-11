@@ -29,6 +29,9 @@ pub struct ClipInfo {
     /// Ids of the library folders the clip is filed in (see `folders.rs`).
     /// `list_clips` leaves it empty; the command fills it in.
     pub folders: Vec<String>,
+    /// The game (application) the clip was recorded in, if known. Like
+    /// `folders`, filled in by the command from `clipmeta.rs`.
+    pub game: Option<String>,
 }
 
 fn is_clip_file(path: &Path) -> bool {
@@ -64,6 +67,7 @@ pub fn list_clips(dir: &Path) -> Result<Vec<ClipInfo>, String> {
                 size_bytes: meta.len(),
                 modified_ms,
                 folders: Vec::new(),
+                game: None,
             })
         })
         .collect();
@@ -97,15 +101,16 @@ pub fn delete_clip(dir: &Path, name: &str) -> Result<(), String> {
 /// Delete a library folder. With `delete_clips`, the clips that are in this
 /// folder and in no other one are deleted from the disk too (the ones that
 /// are also filed elsewhere stay: they just leave this folder); without it the
-/// clips are untouched. Returns how many files were deleted. If a file can't
-/// be deleted the folder is kept, so nothing is left half done silently.
+/// clips are untouched. Returns the names of the files that were deleted, so
+/// whatever else knows those clips can forget them. If a file can't be deleted
+/// the folder is kept, so nothing is left half done silently.
 pub fn delete_folder(
     dir: &Path,
     store: &FolderStore,
     id: &str,
     delete_clips: bool,
-) -> Result<usize, String> {
-    let mut deleted = 0;
+) -> Result<Vec<String>, String> {
+    let mut deleted = Vec::new();
     if delete_clips {
         let mut gone = Vec::new();
         let mut failed = 0;
@@ -113,7 +118,7 @@ pub fn delete_folder(
             let path = clip_path(dir, &name)?;
             match fs::remove_file(&path) {
                 Ok(()) => {
-                    deleted += 1;
+                    deleted.push(name.clone());
                     gone.push(name);
                 }
                 // Already deleted behind our back: nothing left to delete.
@@ -390,7 +395,9 @@ mod tests {
         let path = dir.touch("a.mp4", 1, 1);
         let id = folder(&store, "Mía", &["a.mp4"]);
 
-        assert_eq!(delete_folder(&dir.0, &store, &id, false).unwrap(), 0);
+        assert!(delete_folder(&dir.0, &store, &id, false)
+            .unwrap()
+            .is_empty());
         assert!(path.exists());
         assert!(store.list(&list_clips(&dir.0).unwrap()).is_empty());
     }
@@ -405,7 +412,10 @@ mod tests {
         let id = folder(&store, "Borrar", &["only.mp4", "shared.mp4"]);
         let other = folder(&store, "Otra", &["shared.mp4", "elsewhere.mp4"]);
 
-        assert_eq!(delete_folder(&dir.0, &store, &id, true).unwrap(), 1);
+        assert_eq!(
+            delete_folder(&dir.0, &store, &id, true).unwrap(),
+            ["only.mp4"]
+        );
         assert!(!only.exists());
         assert!(shared.exists() && elsewhere.exists());
 
@@ -426,7 +436,10 @@ mod tests {
         let real = dir.touch("real.mp4", 1, 1);
         let id = folder(&store, "Con fantasma", &["real.mp4", "ghost.mp4"]);
 
-        assert_eq!(delete_folder(&dir.0, &store, &id, true).unwrap(), 1);
+        assert_eq!(
+            delete_folder(&dir.0, &store, &id, true).unwrap(),
+            ["real.mp4"]
+        );
         assert!(!real.exists());
         assert!(store.list(&[]).is_empty());
     }
@@ -449,6 +462,7 @@ mod tests {
             size_bytes: 0,
             modified_ms: 0,
             folders: Vec::new(),
+            game: None,
         }]);
         assert_eq!(listed.len(), 1, "the folder is still there");
         assert_eq!(listed[0].clip_count, 1, "holding only what is left");
