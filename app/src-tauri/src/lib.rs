@@ -1,7 +1,9 @@
 mod dispatch;
 mod editor;
+mod folders;
 mod library;
 mod mic;
+mod persist;
 mod recorder;
 mod settings;
 mod shortcuts;
@@ -26,6 +28,23 @@ mod testutil {
             SEQ.fetch_add(1, Ordering::Relaxed)
         )
     }
+
+    /// A scratch directory that is removed on drop.
+    pub struct TempDir(pub std::path::PathBuf);
+
+    impl TempDir {
+        pub fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("clipforge-{label}-{}", unique()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +52,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dispatch::{dispatch, Actions, Command, MuteOutcome};
+use folders::{FolderDraft, FolderInfo, FolderStore};
 use mic::{MicDevice, MicStatus};
 use recorder::{BufferStatus, Recorder, DEFAULT_CLIP_SECONDS};
 use settings::{Settings, SettingsStore};
@@ -222,22 +242,175 @@ fn open_clips_folder(app: AppHandle) {
 }
 
 #[tauri::command]
-fn list_clips(recorder: tauri::State<'_, Recorder>) -> Result<Vec<library::ClipInfo>, String> {
-    library::list_clips(&recorder.clips_dir())
+fn list_clips(
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+) -> Result<Vec<library::ClipInfo>, String> {
+    let mut clips = library::list_clips(&recorder.clips_dir())?;
+    folders.annotate(&mut clips);
+    Ok(clips)
+}
+
+/// Tell every view that clips or folders changed, so each one reloads.
+fn library_changed(app: &AppHandle) {
+    app.emit("library-changed", ()).ok();
+}
+
+/// The index follows files the app renames, deletes or copies. If it can't be
+/// written the file operation has already happened, so say so and carry on.
+fn keep_index(result: Result<(), String>) {
+    if let Err(e) = result {
+        eprintln!("clipforge: library index: {e}");
+    }
 }
 
 #[tauri::command]
 fn rename_clip(
+    app: AppHandle,
     recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
     name: String,
     new_name: String,
 ) -> Result<String, String> {
-    library::rename_clip(&recorder.clips_dir(), &name, &new_name)
+    let new = library::rename_clip(&recorder.clips_dir(), &name, &new_name)?;
+    if new != name {
+        keep_index(folders.rename_clip(&name, &new));
+        library_changed(&app);
+    }
+    Ok(new)
 }
 
 #[tauri::command]
-fn delete_clip(recorder: tauri::State<'_, Recorder>, name: String) -> Result<(), String> {
-    library::delete_clip(&recorder.clips_dir(), &name)
+fn delete_clip(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+    name: String,
+) -> Result<(), String> {
+    library::delete_clip(&recorder.clips_dir(), &name)?;
+    keep_index(folders.forget_clips(&[name]));
+    library_changed(&app);
+    Ok(())
+}
+
+// ---- Library folders (folders.rs) ----
+
+/// `id`'s folder as the UI shows it (with the counts of the clips on disk).
+fn folder_info(recorder: &Recorder, folders: &FolderStore, id: &str) -> Result<FolderInfo, String> {
+    let clips = library::list_clips(&recorder.clips_dir())?;
+    folders
+        .list(&clips)
+        .into_iter()
+        .find(|f| f.id == id)
+        .ok_or_else(|| "la carpeta ya no existe".to_string())
+}
+
+/// Names the webview sent, checked to be clips that exist in the clips folder.
+fn existing_clips(recorder: &Recorder, names: &[String]) -> Result<Vec<String>, String> {
+    let dir = recorder.clips_dir();
+    for name in names {
+        if !library::clip_path(&dir, name)?.is_file() {
+            return Err(format!("el clip «{name}» ya no existe"));
+        }
+    }
+    Ok(names.to_vec())
+}
+
+#[tauri::command]
+fn list_folders(
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+) -> Result<Vec<FolderInfo>, String> {
+    let clips = library::list_clips(&recorder.clips_dir())?;
+    Ok(folders.list(&clips))
+}
+
+#[tauri::command]
+fn create_folder(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+    draft: FolderDraft,
+) -> Result<FolderInfo, String> {
+    let id = folders.create(&draft)?;
+    library_changed(&app);
+    folder_info(&recorder, &folders, &id)
+}
+
+#[tauri::command]
+fn update_folder(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+    id: String,
+    draft: FolderDraft,
+) -> Result<FolderInfo, String> {
+    folders.update(&id, &draft)?;
+    library_changed(&app);
+    folder_info(&recorder, &folders, &id)
+}
+
+/// Delete a folder; with `delete_clips` also the clips only it holds. Returns
+/// how many clip files were deleted.
+#[tauri::command]
+fn delete_folder(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+    id: String,
+    delete_clips: bool,
+) -> Result<usize, String> {
+    let result = library::delete_folder(&recorder.clips_dir(), &folders, &id, delete_clips);
+    // Even a failed attempt may have deleted some clips.
+    library_changed(&app);
+    result
+}
+
+#[tauri::command]
+fn set_clip_folders(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+    name: String,
+    folder_ids: Vec<String>,
+) -> Result<(), String> {
+    let names = existing_clips(&recorder, &[name])?;
+    folders.set_clip_folders(&names[0], &folder_ids)?;
+    library_changed(&app);
+    Ok(())
+}
+
+/// File clips in a folder; returns how many were not already in it.
+#[tauri::command]
+fn add_to_folder(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+    id: String,
+    names: Vec<String>,
+) -> Result<usize, String> {
+    let names = existing_clips(&recorder, &names)?;
+    let added = folders.add_to_folder(&id, &names)?;
+    library_changed(&app);
+    Ok(added)
+}
+
+#[tauri::command]
+fn remove_from_folder(
+    app: AppHandle,
+    recorder: tauri::State<'_, Recorder>,
+    folders: tauri::State<'_, FolderStore>,
+    id: String,
+    names: Vec<String>,
+) -> Result<usize, String> {
+    // The files may be gone already; only the names have to be plain.
+    let dir = recorder.clips_dir();
+    for name in &names {
+        library::clip_path(&dir, name)?;
+    }
+    let removed = folders.remove_from_folder(&id, &names)?;
+    library_changed(&app);
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -283,8 +456,11 @@ async fn trim_clip(
     request: editor::TrimRequest,
 ) -> Result<editor::TrimResult, String> {
     let dir = app.state::<Recorder>().clips_dir();
+    let source = request.name.clone();
     let result = blocking(move || editor::trim_clip(&dir, &request)).await?;
-    // The gallery refreshes itself and highlights the new clip.
+    // The copy sits in the same folders as the clip it came from.
+    keep_index(app.state::<FolderStore>().inherit(&source, &result.name));
+    // The views refresh themselves and highlight the new clip.
     app.emit("clip-saved", &result.name).ok();
     Ok(result)
 }
@@ -380,6 +556,13 @@ pub fn run() {
             rename_clip,
             delete_clip,
             reveal_clip,
+            list_folders,
+            create_folder,
+            update_folder,
+            delete_folder,
+            set_clip_folders,
+            add_to_folder,
+            remove_from_folder,
             describe_clip,
             clip_waveform,
             trim_clip,
@@ -401,6 +584,9 @@ pub fn run() {
                 app.path().app_config_dir()?.join("settings.json"),
             ));
             app.manage(Arc::clone(&settings));
+            app.manage(FolderStore::load(
+                app.path().app_config_dir()?.join("library.json"),
+            ));
             app.manage(Recorder::new(clips_dir, Arc::clone(&settings)));
             app.manage(MeterActive(AtomicBool::new(false)));
 

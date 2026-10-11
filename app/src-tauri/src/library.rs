@@ -10,6 +10,8 @@ use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 
+use crate::folders::FolderStore;
+
 const EXTENSION: &str = "mp4";
 const MAX_STEM_LEN: usize = 120;
 const FORBIDDEN_CHARS: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
@@ -24,6 +26,9 @@ pub struct ClipInfo {
     pub size_bytes: u64,
     /// Milliseconds since the Unix epoch.
     pub modified_ms: u64,
+    /// Ids of the library folders the clip is filed in (see `folders.rs`).
+    /// `list_clips` leaves it empty; the command fills it in.
+    pub folders: Vec<String>,
 }
 
 fn is_clip_file(path: &Path) -> bool {
@@ -58,6 +63,7 @@ pub fn list_clips(dir: &Path) -> Result<Vec<ClipInfo>, String> {
                 path: path.to_string_lossy().into_owned(),
                 size_bytes: meta.len(),
                 modified_ms,
+                folders: Vec::new(),
             })
         })
         .collect();
@@ -86,6 +92,44 @@ pub fn clip_path(dir: &Path, name: &str) -> Result<PathBuf, String> {
 pub fn delete_clip(dir: &Path, name: &str) -> Result<(), String> {
     let path = clip_path(dir, name)?;
     fs::remove_file(&path).map_err(|e| format!("no se pudo borrar el clip: {e}"))
+}
+
+/// Delete a library folder. With `delete_clips`, the clips that are in this
+/// folder and in no other one are deleted from the disk too (the ones that
+/// are also filed elsewhere stay: they just leave this folder); without it the
+/// clips are untouched. Returns how many files were deleted. If a file can't
+/// be deleted the folder is kept, so nothing is left half done silently.
+pub fn delete_folder(
+    dir: &Path,
+    store: &FolderStore,
+    id: &str,
+    delete_clips: bool,
+) -> Result<usize, String> {
+    let mut deleted = 0;
+    if delete_clips {
+        let mut gone = Vec::new();
+        let mut failed = 0;
+        for name in store.exclusive_clips(id)? {
+            let path = clip_path(dir, &name)?;
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    deleted += 1;
+                    gone.push(name);
+                }
+                // Already deleted behind our back: nothing left to delete.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => gone.push(name),
+                Err(_) => failed += 1,
+            }
+        }
+        store.forget_clips(&gone)?;
+        if failed > 0 {
+            return Err(format!(
+                "no se pudieron borrar {failed} clips; la carpeta se conservó"
+            ));
+        }
+    }
+    store.delete(id)?;
+    Ok(deleted)
 }
 
 /// Validate a user-typed clip name (with or without the `.mp4` suffix) and
@@ -318,5 +362,110 @@ mod tests {
         assert!(rename_clip(&dir.0, "../a.mp4", "b").is_err());
         assert!(rename_clip(&dir.0, "a.mp4", "../b").is_err());
         assert!(rename_clip(&dir.0, "missing.mp4", "b").is_err());
+    }
+
+    // ---- deleting a library folder ------------------------------------------
+
+    fn store_in(dir: &TempDir) -> FolderStore {
+        FolderStore::load(dir.0.join("config").join("library.json"))
+    }
+
+    fn folder(store: &FolderStore, name: &str, clips: &[&str]) -> String {
+        let id = store
+            .create(&crate::folders::FolderDraft {
+                name: name.into(),
+                color: "blue".into(),
+                icon: "folder".into(),
+            })
+            .unwrap();
+        let names: Vec<String> = clips.iter().map(|c| c.to_string()).collect();
+        store.add_to_folder(&id, &names).unwrap();
+        id
+    }
+
+    #[test]
+    fn deleting_a_folder_can_keep_its_clips() {
+        let dir = TempDir::new("del-folder-keep");
+        let store = store_in(&dir);
+        let path = dir.touch("a.mp4", 1, 1);
+        let id = folder(&store, "Mía", &["a.mp4"]);
+
+        assert_eq!(delete_folder(&dir.0, &store, &id, false).unwrap(), 0);
+        assert!(path.exists());
+        assert!(store.list(&list_clips(&dir.0).unwrap()).is_empty());
+    }
+
+    #[test]
+    fn deleting_a_folder_with_its_clips_spares_the_shared_ones() {
+        let dir = TempDir::new("del-folder-all");
+        let store = store_in(&dir);
+        let only = dir.touch("only.mp4", 1, 1);
+        let shared = dir.touch("shared.mp4", 1, 1);
+        let elsewhere = dir.touch("elsewhere.mp4", 1, 1);
+        let id = folder(&store, "Borrar", &["only.mp4", "shared.mp4"]);
+        let other = folder(&store, "Otra", &["shared.mp4", "elsewhere.mp4"]);
+
+        assert_eq!(delete_folder(&dir.0, &store, &id, true).unwrap(), 1);
+        assert!(!only.exists());
+        assert!(shared.exists() && elsewhere.exists());
+
+        let mut clips = list_clips(&dir.0).unwrap();
+        store.annotate(&mut clips);
+        let in_other: Vec<_> = clips
+            .iter()
+            .filter(|c| c.folders == [other.clone()])
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(in_other.len(), 2, "the other folder lost nothing");
+    }
+
+    #[test]
+    fn a_clip_already_gone_does_not_block_deleting_the_folder() {
+        let dir = TempDir::new("del-folder-dangling");
+        let store = store_in(&dir);
+        let real = dir.touch("real.mp4", 1, 1);
+        let id = folder(&store, "Con fantasma", &["real.mp4", "ghost.mp4"]);
+
+        assert_eq!(delete_folder(&dir.0, &store, &id, true).unwrap(), 1);
+        assert!(!real.exists());
+        assert!(store.list(&[]).is_empty());
+    }
+
+    #[test]
+    fn if_a_clip_cannot_be_deleted_the_folder_stays() {
+        let dir = TempDir::new("del-folder-fail");
+        let store = store_in(&dir);
+        let fine = dir.touch("fine.mp4", 1, 1);
+        // A directory named like a clip: remove_file refuses it.
+        fs::create_dir(dir.0.join("stuck.mp4")).unwrap();
+        let id = folder(&store, "Atascada", &["fine.mp4", "stuck.mp4"]);
+
+        let err = delete_folder(&dir.0, &store, &id, true).unwrap_err();
+        assert!(err.contains("1 clips"), "{err}");
+        assert!(!fine.exists(), "the deletable one is gone");
+        let listed = store.list(&[ClipInfo {
+            name: "stuck.mp4".into(),
+            path: String::new(),
+            size_bytes: 0,
+            modified_ms: 0,
+            folders: Vec::new(),
+        }]);
+        assert_eq!(listed.len(), 1, "the folder is still there");
+        assert_eq!(listed[0].clip_count, 1, "holding only what is left");
+    }
+
+    #[test]
+    fn deleting_an_unknown_folder_is_an_error() {
+        let dir = TempDir::new("del-folder-unknown");
+        let store = store_in(&dir);
+        assert!(delete_folder(&dir.0, &store, "f99", false).is_err());
+        assert!(delete_folder(&dir.0, &store, "f99", true).is_err());
+    }
+
+    #[test]
+    fn listed_clips_start_without_folders() {
+        let dir = TempDir::new("list-no-folders");
+        dir.touch("a.mp4", 1, 1);
+        assert!(list_clips(&dir.0).unwrap()[0].folders.is_empty());
     }
 }
