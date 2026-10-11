@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { BufferStatus } from "./lib/buffer";
 import type { ClipInfo } from "./lib/clips";
 import type { EditorClip, TrimRequest, TrimResult } from "./lib/editor";
+import type { FolderDraft, FolderInfo } from "./lib/folders";
 import type { MicDevice, MicStatus, Settings } from "./lib/settings";
 import type { Waveform } from "./lib/waveform";
 
@@ -15,6 +16,22 @@ export const renameClip = (name: string, newName: string) =>
 export const deleteClip = (name: string) => invoke<void>("delete_clip", { name });
 export const revealClip = (name: string) => invoke<void>("reveal_clip", { name });
 export const openClipsFolder = () => invoke<void>("open_clips_folder");
+
+// Library folders (src-tauri/src/folders.rs)
+export const listFolders = () => invoke<FolderInfo[]>("list_folders");
+export const createFolder = (draft: FolderDraft) => invoke<FolderInfo>("create_folder", { draft });
+export const updateFolder = (id: string, draft: FolderDraft) =>
+  invoke<FolderInfo>("update_folder", { id, draft });
+/** Resolves with how many clip files were deleted. */
+export const deleteFolder = (id: string, deleteClips: boolean) =>
+  invoke<number>("delete_folder", { id, deleteClips });
+export const setClipFolders = (name: string, folderIds: string[]) =>
+  invoke<void>("set_clip_folders", { name, folderIds });
+/** Resolves with how many of the clips were not already in the folder. */
+export const addToFolder = (id: string, names: string[]) =>
+  invoke<number>("add_to_folder", { id, names });
+export const removeFromFolder = (id: string, names: string[]) =>
+  invoke<number>("remove_from_folder", { id, names });
 
 // Clip editor (src-tauri/src/editor.rs)
 export const describeClip = (name: string) => invoke<EditorClip>("describe_clip", { name });
@@ -30,6 +47,9 @@ export const clipSrc = (clip: ClipInfo) => convertFileSrc(clip.path);
 
 export const onClipSaved = (cb: (name: string) => void): Promise<UnlistenFn> =>
   listen<string>("clip-saved", (e) => cb(e.payload));
+/** Clips or folders changed (from any view): reload what you show. */
+export const onLibraryChanged = (cb: () => void): Promise<UnlistenFn> =>
+  listen<null>("library-changed", () => cb());
 export const onBufferChanged = (cb: (status: BufferStatus) => void): Promise<UnlistenFn> =>
   listen<BufferStatus>("buffer-changed", (e) => cb(e.payload));
 

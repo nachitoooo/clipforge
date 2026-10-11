@@ -10,6 +10,7 @@ const clip = (name: string, modifiedMs: number): ClipInfo => ({
   path: `/clips/${name}`,
   sizeBytes: 1,
   modifiedMs,
+  folders: [],
 });
 
 describe("clipTitle", () => {

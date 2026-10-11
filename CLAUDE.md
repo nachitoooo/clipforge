@@ -63,7 +63,7 @@ hotkey saves the last N seconds as a clip.
   before the requested start and a video edit list hides the extra frames, so
   the start is frame accurate. Never re-encode; audio waveforms are decoded in
   Rust (`symphonia`).
-- **UI:** Tauri 2 + TypeScript (clips gallery, trim editor, settings, hotkeys).
+- **UI:** Tauri 2 + TypeScript (clips gallery, library folders, trim editor, settings, hotkeys).
 - **Global hotkeys:** `global-hotkey` crate.
 - **CI:** GitHub Actions matrix (`windows-latest`, `macos-latest`).
 
@@ -102,6 +102,12 @@ capture empties the buffer, so it needs a warning in the UI. Global
 shortcuts (save clip, mute) are settings too and are (un)registered only through
 `shortcuts.rs`. See `docs/settings-roadmap.md` for the checklist and the planned
 settings.
+
+Library folders (`app/src-tauri/src/folders.rs`, `docs/library.md`): a folder is
+a *label* kept in `library.json`, not a directory — clips stay in the flat clips
+folder and a clip can be in several folders, so the UI still names a clip by its
+file name. Anything that renames, deletes or copies a clip must keep the index in
+step (see the command wrappers in `lib.rs`), and reads never write or prune it.
 
 Key design rule: **the ring buffer stores encoded frames** (not raw), so RAM
 stays bounded (~100MB for 2 min of 1080p60) and saving a clip is a remux, not

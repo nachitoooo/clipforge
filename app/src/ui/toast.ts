@@ -13,3 +13,14 @@ export function toast(message: string, kind: ToastKind = "info", ms = 3200): voi
     setTimeout(() => el.remove(), 400); // fallback if no transition fires
   }, ms);
 }
+
+/** Run an action that may fail; a failure becomes an error toast. True if it worked. */
+export async function attempt(action: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await action();
+    return true;
+  } catch (e) {
+    toast(String(e), "error");
+    return false;
+  }
+}

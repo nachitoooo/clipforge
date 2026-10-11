@@ -2,7 +2,7 @@ import * as api from "./api";
 import { h, svg } from "./ui/dom";
 import { createGallery } from "./ui/gallery";
 import { icons } from "./ui/icons";
-import { libraryPlaceholder, renderPlaceholder } from "./ui/placeholder";
+import { createLibrary } from "./ui/library";
 import { createSettings } from "./ui/settings";
 import { toast } from "./ui/toast";
 
@@ -34,7 +34,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   content.append(...Object.values(views));
 
   const gallery = createGallery(views.recent);
-  renderPlaceholder(views.library, libraryPlaceholder);
+  const library = createLibrary(views.library);
   const settingsView = createSettings(views.settings);
 
   const buttons = new Map<ViewId, HTMLButtonElement>();
@@ -42,6 +42,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     for (const [viewId, el] of Object.entries(views) as [ViewId, HTMLElement][]) {
       el.hidden = viewId !== id;
     }
+    if (id === "library") library.onShow();
     if (id === "settings") settingsView.onShow();
     else settingsView.onHide();
     for (const [navId, button] of buttons) {
@@ -78,7 +79,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   await Promise.all([
     api.onClipSaved((name) => {
       gallery.markFresh(name);
+      library.markFresh(name);
       void gallery.refresh();
+      void library.refresh();
+    }),
+    // Folders or filing changed in one view: the other one shows it too.
+    api.onLibraryChanged(() => {
+      void gallery.refresh();
+      void library.refresh();
     }),
     api.onBufferChanged((status) => gallery.setBufferStatus(status)),
     api.onSettingsChanged((settings) => gallery.setSaveShortcut(settings.shortcuts.saveClip)),
@@ -93,4 +101,5 @@ window.addEventListener("DOMContentLoaded", async () => {
     .then((settings) => gallery.setSaveShortcut(settings.shortcuts.saveClip))
     .catch((e) => toast(String(e), "error"));
   void gallery.refresh();
+  void library.refresh();
 });

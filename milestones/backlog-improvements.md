@@ -14,6 +14,8 @@ they come up (see CLAUDE.md → Improvement Backlog).
 - **Status (2026-10-09):** sidebar shell built in `feat/3/clips-gallery`
   (Recientes = gallery; Biblioteca and Configuración are "Próximamente"
   placeholders until folders and F-3.3 exist).
+- **Status (2026-10-10):** Biblioteca built as F-3.9 (folders, several per
+  clip) in `feat/3/library-folders`; Configuración is F-3.3.
 - **Added:** 2026-07-07
 
 ## Embed libobs as capture/encode engine
@@ -76,3 +78,17 @@ they come up (see CLAUDE.md → Improvement Backlog).
   * Undo/redo and a draggable selection body (slide the whole cut).
 - **Added:** 2026-10-09
 
+## Library follow-ups
+- **Related to:** F-3.9
+- **Why:** the first library makes, edits and fills folders; these are what
+  people will ask for next.
+- **Details:**
+  * Folder cover: the newest clip's frame (or a mosaic) instead of a plain icon.
+  * Select several clips and file / unfile / delete them at once.
+  * A chip in Recientes that opens its folder (labels are informational today).
+  * Nested folders; manual order of folders (sorted by name today).
+  * New clips land in a chosen folder (a "default folder" setting) or in a folder
+    per game automatically (needs game detection, settings wave 3).
+  * Favorites / protect from automatic deletion (depends on the storage limit).
+  * Follow a clip renamed outside the app (today it leaves its folders).
+- **Added:** 2026-10-10

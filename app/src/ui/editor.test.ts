@@ -21,6 +21,7 @@ const clip: ClipInfo = {
   path: "/clips/clip-20261009-101500.mp4",
   sizeBytes: 5_000_000,
   modifiedMs: 0,
+  folders: [],
 };
 
 const info = (audioTracks: number): EditorClip => ({

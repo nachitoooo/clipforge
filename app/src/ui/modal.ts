@@ -63,3 +63,56 @@ export function confirmDialog(options: {
     confirmButton.focus();
   });
 }
+
+export interface Choice<T extends string> {
+  value: T;
+  label: string;
+  danger?: boolean;
+}
+
+/**
+ * A dialog with more than one way forward. Resolves with the chosen value, or
+ * null on cancel/Esc/backdrop. The first choice is the one focused, so put the
+ * safe one first.
+ */
+export function choiceDialog<T extends string>(options: {
+  title: string;
+  message: string;
+  choices: Choice<T>[];
+}): Promise<T | null> {
+  return new Promise((resolve) => {
+    let answered = false;
+    const answer = (value: T | null) => {
+      if (answered) return;
+      answered = true;
+      close();
+      resolve(value);
+    };
+
+    const buttons = options.choices.map((choice) =>
+      h(
+        "button",
+        {
+          class: choice.danger ? "btn btn-danger" : "btn btn-primary",
+          "data-choice": choice.value,
+          onclick: () => answer(choice.value),
+        },
+        choice.label,
+      ),
+    );
+    const dialog = h(
+      "div",
+      { class: "dialog dialog-wide", role: "alertdialog", "aria-modal": "true" },
+      h("h2", {}, options.title),
+      h("p", {}, options.message),
+      h(
+        "div",
+        { class: "dialog-actions" },
+        h("button", { class: "btn", onclick: () => answer(null) }, "Cancelar"),
+        ...buttons,
+      ),
+    );
+    const close = openModal(dialog, () => answer(null));
+    buttons[0]?.focus();
+  });
+}

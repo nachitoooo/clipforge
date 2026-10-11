@@ -7,12 +7,14 @@
 //! [`Settings::validated`], the one gate every incoming change goes through.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
+
+use crate::persist;
 
 pub const SETTINGS_VERSION: u32 = 1;
 /// Microphone gain bounds, in percent (100 = unchanged, 200 = +6 dB).
@@ -226,8 +228,7 @@ impl SettingsStore {
                 .map(Settings::repaired)
                 .unwrap_or_else(|e| {
                     eprintln!("clipforge: settings file unreadable ({e}); using defaults");
-                    let backup = path.with_extension("json.bak");
-                    fs::rename(&path, backup).ok();
+                    persist::set_aside(&path);
                     Settings::default()
                 }),
             Err(_) => Settings::default(),
@@ -247,22 +248,11 @@ impl SettingsStore {
     pub fn replace(&self, settings: Settings) -> Result<Settings, String> {
         let json = serde_json::to_string_pretty(&settings)
             .map_err(|e| format!("no se pudieron serializar los ajustes: {e}"))?;
-        write_atomic(&self.path, json.as_bytes())
+        persist::write_atomic(&self.path, json.as_bytes())
             .map_err(|e| format!("no se pudieron guardar los ajustes: {e}"))?;
         *self.current.lock().expect("settings lock") = settings.clone();
         Ok(settings)
     }
-}
-
-/// Write to a sibling temp file, then rename over the target, so a crash
-/// mid-write can never leave a half-written settings file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, bytes)?;
-    fs::rename(&tmp, path)
 }
 
 #[cfg(test)]

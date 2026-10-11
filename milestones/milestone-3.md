@@ -28,6 +28,23 @@ app settings.
   — waveform decoded in Rust (symphonia); the real pipeline's two-track clips (real AAC, voice starting late) cut correctly, checked with AVFoundation
 - [ ] Manual check in the app: open a clip from the gallery (scissors on the card, or "Recortar" in the player), cut it, play the copy in QuickTime; try a clip with a separate microphone track
 
+## F-3.9 — Library (folders)
+> **Progress (2026-10-10, branch `feat/3/library-folders`):** implemented; design
+> in [`docs/library.md`](../docs/library.md). A folder is a label over the flat
+> clips folder (index in `library.json`): a clip can be in several folders and
+> filing never moves the file. The UI boxes stay open until someone checks them
+> in the running Tauri window: they are covered by simulated-DOM tests and were
+> driven in headless Chrome against a mock backend, never in the real webview.
+- [x] Folder index: create, rename, edit (name, color, icon), delete; names unique ignoring capitals; atomic persistence, corrupt file kept as `.bak`, hand-edited file tidied on load
+  — Rust unit tests (`folders.rs`); the Tauri command wiring in `lib.rs` has only been compiled
+- [x] A clip can be in several folders; renaming, deleting or trimming a clip keeps the index in step (the trimmed copy joins the original's folders); reads never write or prune
+- [x] Deleting a folder: keep the clips, or delete only the ones no other folder holds; a failure keeps the folder and says how many clips could not go
+- [ ] Biblioteca view: folder grid, "Sin carpeta" section with the unfiled clips, inside a folder (breadcrumb, take a clip out), create / rename in place / edit / delete with the right confirmation
+- [ ] Put clips in folders: *Carpetas…* picker on every clip card (several folders, new folder on the spot) and drag & drop onto a folder card
+- [ ] Recientes shows each clip's folder labels and updates when folders change in the Biblioteca
+- [ ] Windows: drag and drop with `dragDropEnabled: false` (WebView2), never run
+- [ ] Manual check in the app: make folders, file clips both ways, rename / edit / delete (both outcomes), trim a clip that is in a folder
+
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented
 > and verified by tests (see below). Open boxes are things only a person at the
