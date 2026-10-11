@@ -14,6 +14,7 @@ surprises, and the settings planned next (in the order we would build them).
 | Microphone volume 0–200 % | `settings.microphone.gainPercent` | instantly (an atomic shared with the audio thread) |
 | Mute + global shortcut | `settings.microphone.muted`, `muteShortcut` | instantly |
 | Level meter | not stored; streamed only while the screen is open | — |
+| Detect the game when a clip is saved | `settings.library.detectGame` (default on) | live: an atomic shared with the activity tracker; off stops the lookup and forgets what it saw |
 
 ## How to add a setting
 

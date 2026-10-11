@@ -73,6 +73,58 @@ file name. The index is `library.json` in the app config folder, next to
 Every mutation emits `library-changed`; Recientes and Biblioteca both reload on
 it (and on `clip-saved`, and when the window regains focus).
 
+## Smart library (F-3.10)
+
+Searching, filtering and sorting over Recientes, the Biblioteca root and the
+inside of each folder, and a **game** on every clip.
+
+* **The bar** (`ui/filterbar.ts`, pure logic in `lib/filter.ts`): search box,
+  game, folder (not inside a folder), date (today / 7 days / 30 days / this year)
+  and order (newest, oldest, name, size). The search ignores capitals and accents,
+  every word typed has to match, and it looks at the title, the game **and the
+  names of the clip's folders** — the folders are the tags (a clip can be in
+  several). Each view keeps its own filter in memory; the Biblioteca keeps one
+  for the root and a fresh one each time a folder is opened.
+* **In the Biblioteca** a filter turns the root into a list of results over every
+  clip, folder or not (plus the folders whose name matches a search that is
+  not narrowed by anything else). Without a filter it is the folders and
+  «Sin carpeta», and the order still applies to the latter.
+* **Cards are kept** (`clipcard.ts`) while nothing they show changed, so typing in
+  the search box doesn't reload every thumbnail.
+
+### Where the game comes from
+
+While the buffer runs, `core/src/activity/` looks once a second at which
+application is in front (`NSWorkspace` on macOS; the foreground window's process on
+Windows, compiled but never run). Only the application's **name** is read, never
+window titles or contents, and it stays on this machine. When a clip is saved,
+`ActivityLog::dominant` picks the application that held the screen the longest
+during the clip's span — it has to hold at least a fifth of it — ignoring ClipForge
+itself and the desktop shells (`default_ignore`), so saving from the tray or the
+window still names the game. Nothing stood out → no game («Sin juego»).
+
+The game is stored per clip in `clipmeta.json` (`app/src-tauri/src/clipmeta.rs`),
+next to `library.json`, under the same rules: keyed by file name, reads never write
+or prune, all-or-nothing writes, kept in step when a clip is renamed, deleted or
+trimmed (the copy keeps the game). Both indexes share `persist::JsonStore`.
+
+* **Correct it:** the game on a card is a button. «Juego del clip» suggests the
+  games already in the library and, when other clips have the same game, offers
+  «Cambiar en todos los clips de “X”» — the OS names can be ugly
+  (`VALORANT-Win64-Shipping`). The same game with other capitals is one game (the
+  first spelling wins).
+* **Switch it off:** Configuración → Biblioteca → «Detectar el juego al guardar
+  un clip» (on by default). Turning it off stops the lookup and forgets what it
+  saw; clips already tagged keep their game.
+
+### Limits
+
+* Clips saved before this existed have no game until it is set by hand.
+* A game that is minimized or in another window while the clip is recorded can be
+  missed; a game running as administrator on Windows refuses the process lookup.
+* On Windows the lookup has been compiled and linted by the CI cross-check, never
+  run (F-2.4 is open).
+
 ## Known limits
 
 * Renaming or deleting a clip **outside** the app (Finder/Explorer) takes it

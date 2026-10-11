@@ -92,3 +92,34 @@ they come up (see CLAUDE.md → Improvement Backlog).
   * Favorites / protect from automatic deletion (depends on the storage limit).
   * Follow a clip renamed outside the app (today it leaves its folders).
 - **Added:** 2026-10-10
+
+## Smart library follow-ups
+- **Related to:** F-3.10
+- **Why:** the first version searches, filters and tags clips with their game;
+  these are the rough edges and the next obvious steps.
+- **Details:**
+  * Clip duration in the index (probe at save and when missing) → order by
+    duration and a "longer than…" filter.
+  * Remember the filters across restarts (per view).
+  * The application's icon next to the game (`NSRunningApplication.icon`).
+  * An editable list of ignored applications (today `default_ignore`).
+  * Store the game inside the mp4 so it travels with the file and survives a
+    rename in the Finder.
+  * A screen to rename or merge games, instead of only "change in all clips".
+  * Back-fill the game of old clips (a guess from the file name is not possible:
+    only a manual change or the automatic folder of the roadmap).
+  * Follow a clip renamed outside the app.
+- **Added:** 2026-10-11
+
+## Medal parity: next implementations
+- **Related to:** new (post-F-3.10)
+- **Why:** Medal's features page, compared with what ClipForge has.
+- **Details:** the full comparison, order, dependencies and a plan per feature
+  (clip-length shortcuts, sharing without a server, screenshots, automatic folder
+  per game and per-game profiles, markers, export with a bounded re-encode,
+  game events through official local APIs, per-application audio, long sessions,
+  HEVC/AV1/4K, monitor or window capture) is in
+  [`docs/medal-roadmap.md`](../docs/medal-roadmap.md). Open decisions are listed
+  at its end; the one that unlocks the most is the re-encode exception for an
+  explicit "Exportar…" action.
+- **Added:** 2026-10-11
