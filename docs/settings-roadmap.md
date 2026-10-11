@@ -147,7 +147,7 @@ capture needs the "buffer will be emptied" warning.
 
 | Idea | Why | Effort | Notes |
 |---|---|---|---|
-| Sub-folders per game or date | Automatic order | S | `ClipService::unique_clip_path`; comes with the name template |
+| Automatic folders per game or date | Automatic order | S | Library folders exist now (`docs/library.md`): this files each new clip into one on save; comes with the name template and game detection |
 | Favorites / protect from automatic deletion | The storage limit must not delete what matters | M | Depends on the storage limit (wave 2) |
 | Size cap for sharing (10 / 25 / 50 MB) | Clips that fit in a chat message | L | **Conflicts with a rule**: needs re-encoding, while `CLAUDE.md` says ffmpeg only stream-copies. The exception has to be decided first |
 
