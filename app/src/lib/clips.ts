@@ -4,11 +4,19 @@ export interface ClipInfo {
   path: string;
   sizeBytes: number;
   modifiedMs: number;
+  /** Ids of the library folders the clip is filed in. */
+  folders: string[];
 }
 
 export interface ClipGroup {
   label: string;
   clips: ClipInfo[];
+}
+
+/** `Sin clips`, `1 clip`, `12 clips`. */
+export function clipCountLabel(n: number): string {
+  if (n === 0) return "Sin clips";
+  return n === 1 ? "1 clip" : `${n} clips`;
 }
 
 /** File name without the `.mp4` extension, shown as the clip title. */

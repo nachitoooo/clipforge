@@ -21,4 +21,29 @@ export const icons = {
   stepForward: `${open}<path d="M18 5v14"/><path d="M6 6l8 6-8 6z" fill="currentColor"/></svg>`,
   close: `${open}<path d="M6 6l12 12M18 6L6 18"/></svg>`,
   forge: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.2 2.5c.3 3-1.2 4.3-2.6 5.8C9.2 9.8 8 11.2 8 13.4a4 4 0 0 0 8 0c0-1.2-.5-2.2-1.2-3 1.9.8 4.2 3 4.2 6.1A7 7 0 0 1 5 16.5c0-3 1.4-5 3-6.8 1.7-1.9 4.6-3.6 5.2-7.2z"/></svg>`,
+  folderPlus: `${open}<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/></svg>`,
+  folderMinus: `${open}<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9.5 13h5"/></svg>`,
+  palette: `${open}<path d="M12 3a9 9 0 1 0 0 18c1.3 0 1.9-.9 1.5-1.9-.4-1 .3-2.1 1.4-2.1H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r=".9" fill="currentColor"/><circle cx="10" cy="7.5" r=".9" fill="currentColor"/><circle cx="14.5" cy="7.5" r=".9" fill="currentColor"/></svg>`,
+  reveal: `${open}<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>`,
+  plus: `${open}<path d="M12 5v14M5 12h14"/></svg>`,
+  check: `${open}<path d="M5 12.5l4.5 4.5L19 7"/></svg>`,
+  star: `${open}<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>`,
+  trophy: `${open}<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M9.5 17h5"/></svg>`,
+  gamepad: `${open}<rect x="3" y="7" width="18" height="11" rx="5"/><path d="M8 10.5v4M6 12.5h4M15.5 11.5h.01M17.5 13.5h.01"/></svg>`,
+  bolt: `${open}<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg>`,
+  heart: `${open}<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>`,
+  target: `${open}<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>`,
+  flame: `${open}<path d="M12 3c.6 3.2-1.6 4.6-3.2 6.6C7.4 11.3 7 12.6 7 14a5 5 0 0 0 10 0c0-1.8-.8-3.1-1.8-4.2-.3 1.2-1 2-2 2.4.5-3.4-.1-6.7-1.2-9.2z"/></svg>`,
 } as const;
+
+/** Drawings for the folder icon ids (`FOLDER_ICONS` in `lib/folders.ts`). */
+export const folderIcons: Record<string, string> = {
+  folder: icons.folder,
+  star: icons.star,
+  trophy: icons.trophy,
+  gamepad: icons.gamepad,
+  bolt: icons.bolt,
+  heart: icons.heart,
+  target: icons.target,
+  flame: icons.flame,
+};
