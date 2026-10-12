@@ -1,15 +1,88 @@
 # ClipForge
 
-Cross-platform (Windows + macOS) desktop app for game highlight clips: a
-continuous replay buffer records gameplay in the background and a global
-hotkey saves the last N seconds as a shareable .mp4.
+[![CI](https://github.com/nachitoooo/clipforge/actions/workflows/ci.yml/badge.svg)](https://github.com/nachitoooo/clipforge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Stack:** Rust core (per-OS capture + hardware encoding) · Tauri 2 UI.
+Open-source game highlight clips for Windows and macOS. A replay buffer records
+your screen and sound in the background; press a hotkey and the last seconds
+(or minutes) become an `.mp4` you can trim, organize and share. Think Medal or
+ShadowPlay, without an account and without leaving your machine.
 
-## How this repo works
+**Stack:** Rust core (per-OS capture and hardware encoding) · Tauri 2 + TypeScript UI.
 
-- `CLAUDE.md` — the operating manual: stack, conventions, testing rules, build commands.
-- `milestones/` — feature tracking with IDs and acceptance criteria; the single source of truth for progress.
-- `milestones/backlog-improvements.md` — ideas parking lot.
+## What it does today
 
-Start by reading `CLAUDE.md`, then `milestones/milestone-1.md`.
+- **Replay buffer** that keeps *encoded* frames (about 100 MB for two minutes of
+  1080p60), so saving a clip is a remux, never a re-encode.
+- **Global hotkeys**, configurable: one for the main clip length, up to four more
+  with a length of their own (say F9 for the last 15 s, F10 for the last minute),
+  plus mute for the microphone.
+- **Game sound and microphone**, mixed or on separate tracks.
+- **Gallery and editor**: previews, rename, delete, and a trim editor that cuts
+  by stream copy with a frame-accurate start (no quality loss), with a waveform
+  per audio track.
+- **Library**: your own folders (a clip can live in several), search, filters
+  by game, date and folder, and a game detected from the application that was in
+  front while the clip was recorded (name only, kept on your computer, can be
+  switched off).
+- Lives in the tray; a clip is never uploaded anywhere.
+
+## Status
+
+| | macOS | Windows |
+|---|---|---|
+| Capture + hardware encoding | ScreenCaptureKit + VideoToolbox, working | Not implemented yet ([F-2.4](milestones/milestone-2.md)) |
+| Audio (game + microphone) | Working | Compiles in CI, never run |
+| UI, library, editor, settings | Working | Same code; waits on capture |
+
+Progress is tracked feature by feature in [`milestones/`](milestones/); what is
+planned next (compared with what Medal offers) is in
+[`docs/medal-roadmap.md`](docs/medal-roadmap.md) (in Spanish).
+
+## Build and run
+
+You need a recent stable [Rust](https://rustup.rs), Node.js, and the
+[Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your OS.
+
+```bash
+# Run the desktop app
+cd app && npm install && npm run tauri dev
+
+# Tests
+cargo test -p clipforge-core          # capture/encode/buffer/clip engine
+cargo test -p clipforge-app --lib     # app logic (settings, shortcuts, library)
+cd app && npm test                    # UI logic and views (vitest + happy-dom)
+```
+
+On macOS the first run asks for **Screen Recording** permission (System Settings →
+Privacy & Security), and **Microphone** only if you switch the microphone on.
+The engine tests don't need a screen: they run against a synthetic test-pattern
+source. Tests that touch the real screen or devices are `#[ignore]`d and run
+with `cargo test -- --ignored`.
+
+## Layout
+
+```
+core/       clipforge-core: capture → encode → ring buffer → clip (no ffmpeg)
+app/        Tauri 2 app: src-tauri/ (Rust) and src/ (TypeScript UI)
+docs/       design notes (library, clip editor, settings, Windows setup)
+milestones/ feature tracking with acceptance criteria
+```
+
+## Contributing
+
+Issues and pull requests are welcome. [`CLAUDE.md`](CLAUDE.md) is the operating
+manual for this repo (conventions, testing rules, architecture) and applies to
+people as much as to tools:
+
+- work on a branch (`feat/<milestone>/<name>` or `fix/<name>`) and open a PR;
+- every feature comes with unit tests;
+- clips are cut by stream copy, never re-encoded;
+- keep `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt` clean.
+
+Windows capture ([F-2.4](milestones/milestone-2.md)) is the biggest open piece and
+a good place to help; see [`docs/windows-setup.md`](docs/windows-setup.md).
+
+## License
+
+[MIT](LICENSE)
