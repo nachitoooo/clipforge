@@ -5,42 +5,25 @@ on:
   workflow_dispatch:
 
 jobs:
-  probe:
+  audio:
     runs-on: windows-latest
     steps:
-      - name: System
+      - name: Audio endpoints before
         shell: powershell
         run: |
-          [Environment]::OSVersion | Format-List
-          (Get-CimInstance Win32_OperatingSystem) | Select-Object Caption, Version, BuildNumber | Format-List
-          "SESSIONNAME=$env:SESSIONNAME  USERNAME=$env:USERNAME"
-          query session 2>&1
-          "--- video controllers"
-          Get-CimInstance Win32_VideoController | Select-Object Name, AdapterCompatibility, VideoModeDescription, CurrentHorizontalResolution, CurrentVerticalResolution | Format-List
-          "--- screens"
-          Add-Type -AssemblyName System.Windows.Forms
-          [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { "$($_.DeviceName) $($_.Bounds) primary=$($_.Primary)" }
+          Get-PnpDevice -Class AudioEndpoint -ErrorAction SilentlyContinue | Format-Table FriendlyName, Status -AutoSize
+          Get-CimInstance Win32_SoundDevice | Format-Table Name, Status -AutoSize
           exit 0
-      - name: Media Foundation
-        if: always()
+      - name: Install a virtual audio cable
         shell: powershell
         run: |
-          foreach ($f in "mf.dll","mfplat.dll","mfreadwrite.dll","mfh264enc.dll","mfaacenc.dll","mfcore.dll","msmpeg2enc.dll") {
-            $p = Join-Path $env:SystemRoot "System32\$f"
-            "{0,-18} {1}" -f $f, (Test-Path $p)
-          }
-          "--- features"
-          Get-WindowsFeature *Media* | Format-Table Name, InstallState -AutoSize
-      - name: Graphics capture + audio
-        if: always()
+          choco install vb-cable -y --no-progress 2>&1 | Select-Object -Last 25
+          exit 0
+      - name: Audio endpoints after
         shell: powershell
         run: |
-          try {
-            [Windows.Graphics.Capture.GraphicsCaptureSession,Windows.Graphics.Capture,ContentType=WindowsRuntime] | Out-Null
-            "GraphicsCaptureSession.IsSupported = " + [Windows.Graphics.Capture.GraphicsCaptureSession]::IsSupported()
-          } catch { "WGC probe failed: $_" }
-          "--- audio"
-          Get-Service Audiosrv, AudioEndpointBuilder | Format-Table Name, Status, StartType -AutoSize
-          Get-CimInstance Win32_SoundDevice | Select-Object Name, Status | Format-Table -AutoSize
-          "--- tools"
-          Get-Command ffmpeg, ffprobe -ErrorAction SilentlyContinue | Select-Object Name, Source | Format-Table -AutoSize
+          Start-Sleep -Seconds 8
+          Get-PnpDevice -Class AudioEndpoint -ErrorAction SilentlyContinue | Format-Table FriendlyName, Status -AutoSize
+          Get-CimInstance Win32_SoundDevice | Format-Table Name, Status -AutoSize
+          Get-Service Audiosrv | Format-Table Name, Status
+          exit 0
