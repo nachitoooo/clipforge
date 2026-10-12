@@ -1,0 +1,136 @@
+name: Windows app
+
+# Builds the real app on a Windows runner, starts it, plays a tone, presses the
+# save-clip hotkey and checks that a clip with picture and sound appeared and
+# that Windows plays it. Manual, and on pushes that touch the app.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "core/src/**"
+      - ".github/workflows/windows-app.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install a virtual audio cable (the runner has no sound card)
+        shell: powershell
+        run: |
+          choco install vb-cable -y --no-progress | Out-Null
+          $dir = "C:\ProgramData\chocolatey\lib\vb-cable\tools"
+          $sig = Get-AuthenticodeSignature (Get-ChildItem $dir -Filter "*.cat" | Select-Object -First 1).FullName
+          $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPublisher","LocalMachine")
+          $store.Open("ReadWrite"); $store.Add($sig.SignerCertificate); $store.Close()
+          $p = Start-Process -FilePath "$dir\VBCABLE_Setup_x64.exe" -ArgumentList "-i","-h" -PassThru
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; "cable setup timed out" }
+          Start-Sleep -Seconds 8
+          Get-PnpDevice -Class AudioEndpoint | Format-Table FriendlyName, Status -AutoSize
+          exit 0
+
+      - name: Build the app
+        working-directory: app
+        run: |
+          npm ci
+          npm run tauri build -- --no-bundle
+
+      - name: Start the app, play a tone, press the save hotkey
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $exe = Resolve-Path "target\release\clipforge-app.exe"
+          "starting $exe"
+          $app = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($app.HasExited) { "THE APP EXITED with code $($app.ExitCode)"; exit 1 }
+          Get-Process clipforge-app | Format-Table Id, MainWindowTitle, Responding, WorkingSet64 -AutoSize
+
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          function Shot($name) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("artifacts\$name.png"); $bmp.Dispose()
+          }
+          Shot "1-app-started"
+
+          # a 440 Hz tone for the sound of the clip
+          Add-Type -TypeDefinition @"
+          using System; using System.IO;
+          public static class Tone {
+            public static void Write(string path, int seconds, double hz) {
+              int rate = 48000; int frames = rate * seconds;
+              using (var w = new BinaryWriter(File.Create(path))) {
+                w.Write(new char[]{'R','I','F','F'}); w.Write(36 + frames * 4);
+                w.Write(new char[]{'W','A','V','E','f','m','t',' '}); w.Write(16); w.Write((short)1); w.Write((short)2);
+                w.Write(rate); w.Write(rate * 4); w.Write((short)4); w.Write((short)16);
+                w.Write(new char[]{'d','a','t','a'}); w.Write(frames * 4);
+                for (int n = 0; n < frames; n++) { short v = (short)(0.5 * Math.Sin(2 * Math.PI * hz * n / rate) * 32767); w.Write(v); w.Write(v); }
+              }
+            }
+          }
+"@
+          [Tone]::Write("$PWD\artifacts\tone.wav", 14, 440)
+          $player = Start-Process powershell -ArgumentList "-NoProfile","-Command","(New-Object Media.SoundPlayer '$PWD\artifacts\tone.wav').PlaySync()" -PassThru
+
+          # keep the screen changing while the buffer fills
+          Add-Type -TypeDefinition @"
+          using System; using System.Runtime.InteropServices;
+          public static class Input {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, int flags, int extra);
+          }
+"@
+          for ($i = 0; $i -lt 100; $i++) {
+            [Input]::SetCursorPos(200 + ($i * 7) % 600, 200 + ($i * 11) % 400) | Out-Null
+            Start-Sleep -Milliseconds 80
+          }
+          Shot "2-before-hotkey"
+
+          # Ctrl+Shift+S
+          [Input]::keybd_event(0x11, 0, 0, 0); [Input]::keybd_event(0x10, 0, 0, 0); [Input]::keybd_event(0x53, 0, 0, 0)
+          Start-Sleep -Milliseconds 120
+          [Input]::keybd_event(0x53, 0, 2, 0); [Input]::keybd_event(0x10, 0, 2, 0); [Input]::keybd_event(0x11, 0, 2, 0)
+          Start-Sleep -Seconds 8
+          Shot "3-after-hotkey"
+
+          $clips = Get-ChildItem "$env:USERPROFILE\Videos\ClipForge" -Filter *.mp4 -ErrorAction SilentlyContinue
+          "clips found: $($clips.Count)"
+          $clips | Format-Table Name, Length -AutoSize
+          Get-ChildItem "$env:APPDATA\com.clipforge.app" -ErrorAction SilentlyContinue | Format-Table Name, Length -AutoSize
+          if (-not $clips) { "NO CLIP WAS SAVED"; Stop-Process -Id $player.Id -Force -ErrorAction SilentlyContinue; Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue; exit 1 }
+          Copy-Item $clips[0].FullName "artifacts\app-clip.mp4"
+          Stop-Process -Id $player.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+
+      - name: Does Windows play the clip, with the tone?
+        shell: bash
+        env:
+          CLIPFORGE_APP_CLIP: ${{ github.workspace }}/artifacts/app-clip.mp4
+          CLIPFORGE_EXPECT_TONE: "440"
+        run: cargo test --release -p clipforge-core --test windows_video -- --ignored --exact a_clip_saved_by_the_app_plays_in_windows --nocapture
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-app-output
+          path: artifacts
+          if-no-files-found: warn

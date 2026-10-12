@@ -836,3 +836,46 @@ fn the_recorder_saves_a_clip_with_the_sound_that_was_playing() {
         "440 Hz should dominate: {at_440} vs {at_1000}"
     );
 }
+
+// ---- a clip made by the installed app ----------------------------------------------
+
+/// The `windows-app` workflow runs the real app, presses its save hotkey and
+/// hands the clip it wrote to this test: `CLIPFORGE_APP_CLIP` is its path and
+/// `CLIPFORGE_EXPECT_TONE` (Hz, optional) the tone that was playing meanwhile.
+#[test]
+#[ignore = "needs CLIPFORGE_APP_CLIP: a clip saved by the app"]
+fn a_clip_saved_by_the_app_plays_in_windows() {
+    let path = PathBuf::from(
+        std::env::var_os("CLIPFORGE_APP_CLIP").expect("CLIPFORGE_APP_CLIP is the clip's path"),
+    );
+    let size = std::fs::metadata(&path).expect("the clip exists").len();
+    let video = decode_with_windows(&path);
+    eprintln!(
+        "app clip: {size} bytes, {}x{}, {} frames, {:?}",
+        video.width, video.height, video.frames, video.duration
+    );
+    assert!(video.frames >= 20, "only {} frames", video.frames);
+    assert!(
+        video.duration >= Duration::from_secs(1),
+        "{:?}",
+        video.duration
+    );
+
+    if let Some(hz) = std::env::var("CLIPFORGE_EXPECT_TONE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        let sound = decode_audio_with_windows(&path);
+        let wanted = tone_amplitude(&sound, hz);
+        let other = tone_amplitude(&sound, hz * 2.3);
+        eprintln!(
+            "app clip sound: {} Hz x{}, {} samples; {hz} Hz {wanted:.3}, {:.0} Hz {other:.3}",
+            sound.sample_rate,
+            sound.channels,
+            sound.samples.len(),
+            hz * 2.3
+        );
+        assert!(wanted > 0.02, "the tone is not in the clip: {wanted}");
+        assert!(wanted > other * 10.0);
+    }
+}
