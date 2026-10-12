@@ -241,9 +241,30 @@ async fn the_encoder_makes_an_mp4_that_windows_decodes_back_to_the_same_picture(
 
     assert_eq!(packets.len(), 120, "one packet per frame");
     assert!(packets[0].is_keyframe, "starts on an IDR");
+    for (i, p) in packets
+        .iter()
+        .take(8)
+        .chain(packets.iter().skip(58).take(4))
+        .enumerate()
+    {
+        eprintln!(
+            "packet #{i}: pts {:?} dts {:?} key {} len {}",
+            p.pts,
+            p.dts,
+            p.is_keyframe,
+            p.data.len()
+        );
+    }
+    let bad: Vec<_> = packets
+        .windows(2)
+        .enumerate()
+        .filter(|(_, p)| p[1].pts <= p[0].pts)
+        .map(|(i, p)| (i, p[0].pts, p[1].pts))
+        .take(5)
+        .collect();
     assert!(
-        packets.windows(2).all(|p| p[1].pts > p[0].pts),
-        "pts increase"
+        bad.is_empty(),
+        "pts must increase; first offenders (index, before, after): {bad:?}"
     );
     assert!(
         packets.iter().filter(|p| p.is_keyframe).count() >= 2,
@@ -501,10 +522,18 @@ fn the_recorder_saves_a_clip_of_what_was_on_screen() {
 
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let wiggler = wiggle_cursor(Arc::clone(&stop), (screen_w, screen_h));
-    std::thread::sleep(Duration::from_secs(5));
-    let saved = clips
-        .save_last(Duration::from_secs(3))
-        .expect("a clip is saved");
+    for second in 1..=5 {
+        std::thread::sleep(Duration::from_secs(1));
+        eprintln!(
+            "after {second} s: {:?}, running {}",
+            engine.stats(),
+            engine.is_running()
+        );
+    }
+    let saved = match clips.save_last(Duration::from_secs(3)) {
+        Ok(saved) => saved,
+        Err(e) => panic!("no clip: {e}; engine {:?}", engine.stats()),
+    };
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
     wiggler.join().unwrap();
     engine.stop();

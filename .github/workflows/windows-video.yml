@@ -39,7 +39,6 @@ jobs:
         shell: bash
         env:
           CLIPFORGE_TEST_OUT: ${{ github.workspace }}/test-output
-          CLIPFORGE_WGC_TRACE: "1"
         run: |
           cargo test --release -p clipforge-core --test windows_video --no-run
           tests=$(cargo test --release -p clipforge-core --test windows_video -- --ignored --list 2>/dev/null | sed -n 's/: test$//p')
