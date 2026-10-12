@@ -89,7 +89,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       void library.refresh();
     }),
     api.onBufferChanged((status) => gallery.setBufferStatus(status)),
-    api.onSettingsChanged((settings) => gallery.setSaveShortcut(settings.shortcuts.saveClip)),
+    api.onSettingsChanged(({ shortcuts }) =>
+      gallery.setSaveShortcut(shortcuts.saveClip, shortcuts.clipSeconds),
+    ),
   ]);
 
   api
@@ -98,7 +100,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     .catch((e) => toast(String(e), "error"));
   api
     .getSettings()
-    .then((settings) => gallery.setSaveShortcut(settings.shortcuts.saveClip))
+    .then(({ shortcuts }) => gallery.setSaveShortcut(shortcuts.saveClip, shortcuts.clipSeconds))
     .catch((e) => toast(String(e), "error"));
   void gallery.refresh();
   void library.refresh();

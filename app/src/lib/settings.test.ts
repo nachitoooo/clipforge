@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLIP_LENGTH_CHOICES,
   DEFAULT_MUTE_SHORTCUT,
   DEFAULT_SAVE_SHORTCUT,
   clampGain,
+  clipLengthOptions,
   defaultSettings,
+  formatClipLength,
   formatGain,
   gainToDb,
   micStateSummary,
+  shortcutOwners,
+  withAddedShortcut,
+  withExtraShortcut,
   withLibrary,
   withMicrophone,
   withShortcuts,
+  withoutExtraShortcut,
   type MicStatus,
 } from "./settings";
 
@@ -114,5 +121,83 @@ describe("micStateSummary", () => {
   it("an error wins over everything else", () => {
     const s = micStateSummary({ ...base, active: false, error: "x", muted: true, noSignal: true });
     expect(s.tone).toBe("error");
+  });
+});
+
+describe("clip lengths", () => {
+  it("reads them the way people say them", () => {
+    expect(
+      [5, 30, 59, 60, 90, 120].map(formatClipLength),
+    ).toEqual(["5 s", "30 s", "59 s", "1 min", "1 min 30 s", "2 min"]);
+  });
+
+  it("offers the usual lengths, plus a hand-set one in its place", () => {
+    expect(clipLengthOptions(30)).toBe(CLIP_LENGTH_CHOICES);
+    expect(clipLengthOptions(45)).toEqual([15, 30, 45, 60, 120]);
+    expect(clipLengthOptions(5)).toEqual([5, 15, 30, 60, 120]);
+  });
+
+  it("defaults to 30 seconds and no extra shortcuts", () => {
+    const { shortcuts } = defaultSettings();
+    expect(shortcuts.clipSeconds).toBe(30);
+    expect(shortcuts.extraSaveClip).toEqual([]);
+  });
+});
+
+describe("extra save shortcuts", () => {
+  const two = withAddedShortcut(
+    withAddedShortcut(defaultSettings(), { accelerator: "F9", seconds: 15 }),
+    { accelerator: "F10", seconds: 60 },
+  );
+
+  it("adds at the end without touching the original", () => {
+    const original = defaultSettings();
+    const next = withAddedShortcut(original, { accelerator: "F9", seconds: 15 });
+    expect(next.shortcuts.extraSaveClip).toEqual([{ accelerator: "F9", seconds: 15 }]);
+    expect(original.shortcuts.extraSaveClip).toEqual([]);
+    expect(next.microphone).toBe(original.microphone);
+    expect(two.shortcuts.extraSaveClip.map((e) => e.accelerator)).toEqual(["F9", "F10"]);
+  });
+
+  it("patches only the one asked for", () => {
+    const next = withExtraShortcut(two, 1, { seconds: 120 });
+    expect(next.shortcuts.extraSaveClip).toEqual([
+      { accelerator: "F9", seconds: 15 },
+      { accelerator: "F10", seconds: 120 },
+    ]);
+    expect(two.shortcuts.extraSaveClip[1].seconds).toBe(60);
+    expect(withExtraShortcut(two, 5, { seconds: 1 }).shortcuts.extraSaveClip).toEqual(
+      two.shortcuts.extraSaveClip,
+    );
+  });
+
+  it("removes one and keeps the rest in order", () => {
+    expect(withoutExtraShortcut(two, 0).shortcuts.extraSaveClip).toEqual([
+      { accelerator: "F10", seconds: 60 },
+    ]);
+    expect(withoutExtraShortcut(two, 1).shortcuts.extraSaveClip).toHaveLength(1);
+  });
+
+  it("lists every shortcut in use with what it does", () => {
+    const owners = shortcutOwners(two);
+    expect(owners).toEqual([
+      { accelerator: "CommandOrControl+Shift+S", owner: "Guardar clip (30 s)" },
+      { accelerator: "F9", owner: "Guardar clip (15 s)" },
+      { accelerator: "F10", owner: "Guardar clip (1 min)" },
+      { accelerator: "CommandOrControl+Shift+M", owner: "Silenciar el micrófono" },
+    ]);
+  });
+
+  it("leaves out the shortcut being recorded, so it can keep its own keys", () => {
+    const accelerators = (except: Parameters<typeof shortcutOwners>[1]) =>
+      shortcutOwners(two, except).map((o) => o.accelerator);
+    expect(accelerators("save")).not.toContain("CommandOrControl+Shift+S");
+    expect(accelerators("mute")).not.toContain("CommandOrControl+Shift+M");
+    expect(accelerators({ extra: 0 })).toEqual([
+      "CommandOrControl+Shift+S",
+      "F10",
+      "CommandOrControl+Shift+M",
+    ]);
+    expect(accelerators(null)).toHaveLength(4);
   });
 });

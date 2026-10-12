@@ -116,6 +116,34 @@ describe("the save-clip shortcut shown in the gallery", () => {
     expect(root().querySelector(".view-header")).toBe(header);
   });
 
+  const saveButton = () =>
+    root().querySelector<HTMLButtonElement>(".view-header .btn-primary")!;
+
+  it("the button says how much it saves, and follows the length in Settings", async () => {
+    const gallery = createGallery(root());
+    await gallery.refresh();
+    expect(saveButton().title).toBe("Guardar los últimos 30 s");
+
+    gallery.setSaveShortcut("CommandOrControl+Shift+S", 90);
+    expect(saveButton().title).toBe("Guardar los últimos 1 min 30 s");
+    expect(headerKey()).toBe("⇧⌘S");
+
+    // A new shortcut alone keeps the length it already had.
+    gallery.setSaveShortcut("Alt+F9");
+    expect(saveButton().title).toBe("Guardar los últimos 1 min 30 s");
+    expect(headerKey()).toBe("⌥F9");
+  });
+
+  it("a new length alone redraws the header", async () => {
+    const gallery = createGallery(root());
+    await gallery.refresh();
+    const header = root().querySelector(".view-header");
+    gallery.setSaveShortcut("CommandOrControl+Shift+S", 30);
+    expect(root().querySelector(".view-header")).toBe(header);
+    gallery.setSaveShortcut("CommandOrControl+Shift+S", 120);
+    expect(saveButton().title).toBe("Guardar los últimos 2 min");
+  });
+
   it("works before the clips have loaded", async () => {
     const gallery = createGallery(root());
     gallery.setSaveShortcut("Alt+F9");

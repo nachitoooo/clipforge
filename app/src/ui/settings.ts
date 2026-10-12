@@ -5,15 +5,22 @@ import {
   GAIN_MAX_PERCENT,
   DEFAULT_SAVE_SHORTCUT,
   GAIN_MIN_PERCENT,
+  MAX_EXTRA_SAVE_SHORTCUTS,
   MIC_MODE_LABEL,
   MIC_MODE_NOTE,
   clampGain,
+  clipLengthOptions,
   defaultSettings,
+  formatClipLength,
   formatGain,
   micStateSummary,
+  shortcutOwners,
+  withAddedShortcut,
+  withExtraShortcut,
   withMicrophone,
   withLibrary,
   withShortcuts,
+  withoutExtraShortcut,
   type LibrarySettings,
   type MicDevice,
   type MicMode,
@@ -24,7 +31,7 @@ import {
 } from "../lib/settings";
 import { h, svg } from "./dom";
 import { icons } from "./icons";
-import { createShortcutRecorder } from "./shortcut";
+import { createShortcutRecorder, type ShortcutRecorder } from "./shortcut";
 import { switchControl } from "./switch";
 import { toast } from "./toast";
 
@@ -116,24 +123,54 @@ export function createSettings(root: HTMLElement): SettingsView {
     isMac,
     title: "Cambiar el atajo para silenciar",
     current: () => settings.microphone.muteShortcut,
-    conflict: (accelerator) =>
-      ownerOf(accelerator, [{ accelerator: settings.shortcuts.saveClip, owner: "Guardar clip" }]),
+    conflict: (accelerator) => ownerOf(accelerator, shortcutOwners(settings, "mute")),
     onChange: (muteShortcut) => change({ muteShortcut }),
   });
 
   // ---- global shortcuts panel -------------------------------------------
+
+  /** A length picker; the options follow the value so a hand-set one shows too. */
+  function lengthSelect(label: string, onPick: (seconds: number) => void) {
+    const el = h("select", { class: "select select-sm", "aria-label": label });
+    el.addEventListener("change", () => onPick(Number(el.value)));
+    return {
+      el,
+      set(seconds: number): void {
+        const options = clipLengthOptions(seconds);
+        if (el.dataset.options !== options.join(",")) {
+          el.dataset.options = options.join(",");
+          el.replaceChildren(
+            ...options.map((s) => h("option", { value: String(s) }, formatClipLength(s))),
+          );
+        }
+        el.value = String(seconds);
+      },
+    };
+  }
+
+  /** A row whose hint is rewritten as the settings change. */
+  function liveRow(label: string, control: HTMLElement) {
+    const hint = h("div", { class: "row-hint muted" });
+    const el = h(
+      "div",
+      { class: "row" },
+      h("div", { class: "row-text" }, h("div", { class: "row-label" }, label), hint),
+      control,
+    );
+    return { el, hint };
+  }
 
   const saveRecorder = createShortcutRecorder({
     id: "save-clip",
     isMac,
     title: "Cambiar el atajo para guardar un clip",
     current: () => settings.shortcuts.saveClip,
-    conflict: (accelerator) =>
-      ownerOf(accelerator, [
-        { accelerator: settings.microphone.muteShortcut, owner: "Silenciar el micrófono" },
-      ]),
+    conflict: (accelerator) => ownerOf(accelerator, shortcutOwners(settings, "save")),
     onChange: (saveClip) => changeShortcuts({ saveClip }),
   });
+  const saveLength = lengthSelect("Duración del clip", (clipSeconds) =>
+    changeShortcuts({ clipSeconds }),
+  );
   const resetSaveShortcut = h(
     "button",
     {
@@ -146,6 +183,123 @@ export function createSettings(root: HTMLElement): SettingsView {
     },
     "Restablecer",
   );
+  const saveRow = liveRow(
+    "Guardar clip",
+    h("div", { class: "mute-controls" }, saveLength.el, saveRecorder.button, resetSaveShortcut),
+  );
+
+  // Extra save shortcuts, each with its own length. The rows are rebuilt only
+  // when a shortcut is added or removed (a length changes in place, so the
+  // picker keeps its focus). `draft` is a row still waiting for its keys.
+  interface ExtraRow {
+    /** The row and the note under it: siblings, so the row separators line up. */
+    els: HTMLElement[];
+    recorder: ShortcutRecorder;
+    sync(): void;
+  }
+  let extraRows: ExtraRow[] = [];
+  let extraKey = "";
+  let draft: { seconds: number } | null = null;
+  const extraSlot = h("div", { class: "extra-shortcuts" });
+
+  function buildExtraRow(index: number): ExtraRow {
+    const isDraft = index >= settings.shortcuts.extraSaveClip.length;
+    const extra = () => settings.shortcuts.extraSaveClip[index];
+    const seconds = () => (isDraft ? (draft?.seconds ?? 0) : (extra()?.seconds ?? 0));
+    const recorder = createShortcutRecorder({
+      id: `save-extra-${index}`,
+      isMac,
+      title: "Cambiar el atajo",
+      current: () => (isDraft ? "" : (extra()?.accelerator ?? "")),
+      empty: "Elegí una tecla",
+      conflict: (accelerator) =>
+        ownerOf(accelerator, shortcutOwners(settings, isDraft ? null : { extra: index })),
+      onChange: (accelerator) => {
+        if (isDraft) {
+          const added = withAddedShortcut(settings, { accelerator, seconds: seconds() });
+          draft = null;
+          update(added, false);
+        } else {
+          update(withExtraShortcut(settings, index, { accelerator }), false);
+        }
+      },
+    });
+    const length = lengthSelect("Duración del clip de este atajo", (picked) => {
+      if (isDraft) {
+        // Choosing a length is not choosing keys: stop listening so the
+        // arrow keys still work on the picker.
+        recorder.stop();
+        draft = { seconds: picked };
+        row.sync();
+      } else {
+        update(withExtraShortcut(settings, index, { seconds: picked }), false);
+      }
+    });
+    const remove = h(
+      "button",
+      {
+        class: "btn",
+        title: "Quitar este atajo",
+        "data-remove-extra": String(index),
+        onclick: () => {
+          if (isDraft) {
+            draft = null;
+            renderValues();
+          } else {
+            update(withoutExtraShortcut(settings, index), false);
+          }
+        },
+      },
+      "Quitar",
+    );
+    const live = liveRow(
+      "Otro atajo para guardar",
+      h("div", { class: "mute-controls" }, length.el, recorder.button, remove),
+    );
+    const row: ExtraRow = {
+      els: [live.el, recorder.note],
+      recorder,
+      sync() {
+        length.set(seconds());
+        live.hint.textContent = `Guarda los últimos ${formatClipLength(seconds())} del buffer`;
+        recorder.render();
+      },
+    };
+    return row;
+  }
+
+  const addShortcut = h(
+    "button",
+    {
+      class: "btn btn-nowrap",
+      "data-add-shortcut": "",
+      onclick: () => {
+        draft = { seconds: 15 };
+        renderValues();
+        extraRows[extraRows.length - 1]?.recorder.button.click();
+      },
+    },
+    "Agregar atajo",
+  );
+  const addRow = row(
+    "Más atajos",
+    `Hasta ${MAX_EXTRA_SAVE_SHORTCUTS} más, cada uno con su duración: por ejemplo F9 para los últimos 15 segundos y F10 para el último minuto.`,
+    addShortcut,
+  );
+
+  function renderExtras(): void {
+    const count = settings.shortcuts.extraSaveClip.length;
+    const key = `${settings.shortcuts.extraSaveClip.map((e) => e.accelerator).join("|")}#${draft !== null}`;
+    if (key !== extraKey) {
+      extraKey = key;
+      for (const old of extraRows) old.recorder.stop();
+      extraRows = Array.from({ length: count + (draft ? 1 : 0) }, (_, i) => buildExtraRow(i));
+      extraSlot.replaceChildren(...extraRows.flatMap((r) => r.els));
+    }
+    for (const r of extraRows) r.sync();
+    addRow.hidden = count >= MAX_EXTRA_SAVE_SHORTCUTS || draft !== null;
+  }
+
   const shortcutsPanel = h(
     "section",
     { class: "panel", "aria-labelledby": "shortcuts-title" },
@@ -164,17 +318,15 @@ export function createSettings(root: HTMLElement): SettingsView {
       { class: "panel-intro muted" },
       "Funcionan desde cualquier aplicación o juego, aunque ClipForge esté en segundo plano. Podés usar una tecla sola si es de función (F1–F24) o una que no escribe (Insert, Inicio, Fin, RePág, AvPág, Pausa, ImprPant); las demás necesitan ",
       isMac ? "⌘, ⌃ o ⌥" : "Ctrl, Alt o Win",
-      ".",
+      ". Un clip no puede durar más de lo que el buffer ya juntó (hasta 2 minutos).",
     ),
     h(
       "div",
       { class: "panel-body" },
-      row(
-        "Guardar clip",
-        "Guarda los últimos 30 segundos del buffer",
-        h("div", { class: "mute-controls" }, saveRecorder.button, resetSaveShortcut),
-      ),
+      saveRow.el,
       saveRecorder.note,
+      extraSlot,
+      addRow,
     ),
   );
 
@@ -348,6 +500,9 @@ export function createSettings(root: HTMLElement): SettingsView {
     muteSwitch.input.checked = mic.muted;
     muteRecorder.render();
     saveRecorder.render();
+    saveLength.set(settings.shortcuts.clipSeconds);
+    saveRow.hint.textContent = `Guarda los últimos ${formatClipLength(settings.shortcuts.clipSeconds)} del buffer`;
+    renderExtras();
     resetSaveShortcut.hidden = settings.shortcuts.saveClip === DEFAULT_SAVE_SHORTCUT;
     detectSwitch.input.checked = settings.library.detectGame;
     meterHint.textContent = !mic.enabled
@@ -471,6 +626,11 @@ export function createSettings(root: HTMLElement): SettingsView {
       visible = false;
       muteRecorder.stop();
       saveRecorder.stop();
+      for (const r of extraRows) r.recorder.stop();
+      if (draft) {
+        draft = null;
+        renderValues();
+      }
       void api.setMeterActive(false);
       meter.reset();
     },

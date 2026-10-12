@@ -7,8 +7,10 @@ export interface ShortcutRecorderOptions {
   isMac: boolean;
   /** Tooltip of the button. */
   title: string;
-  /** The accelerator to show on the button. */
+  /** The accelerator to show on the button (empty = none chosen yet). */
   current(): string;
+  /** What the button says while `current()` is empty. */
+  empty?: string;
   /** Name of the other feature that already uses `accelerator`, if any. */
   conflict(accelerator: string): string | null;
   /** A new, free shortcut was recorded. */
@@ -90,9 +92,12 @@ export function createShortcutRecorder(options: ShortcutRecorderOptions): Shortc
     button,
     note,
     render() {
+      const current = options.current();
       button.textContent = recording
         ? "Presioná la combinación…"
-        : displayAccelerator(options.current(), options.isMac);
+        : current === ""
+          ? (options.empty ?? "")
+          : displayAccelerator(current, options.isMac);
       button.classList.toggle("recording", recording);
       note.textContent = hint;
     },

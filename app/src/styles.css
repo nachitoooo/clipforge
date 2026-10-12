@@ -743,6 +743,15 @@ kbd {
   margin: 2px 0 0;
 }
 
+/* the extra save shortcuts sit among the panel's rows, so the separators line up */
+.extra-shortcuts {
+  display: contents;
+}
+
+.btn-nowrap {
+  white-space: nowrap;
+}
+
 .shortcut-note {
   margin: -6px 0 0;
   min-height: 1em;

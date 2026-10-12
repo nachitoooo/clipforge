@@ -69,7 +69,7 @@ const qa = <T extends Element>(selector: string) =>
 const enabledSwitch = () => q<HTMLInputElement>('input[aria-label="Grabar el micrófono"]');
 const muteSwitch = () => q<HTMLInputElement>('input[aria-label="Silenciar el micrófono"]');
 const gainSlider = () => q<HTMLInputElement>('input[type="range"]');
-const deviceSelect = () => q<HTMLSelectElement>("select");
+const deviceSelect = () => q<HTMLSelectElement>('select[aria-label="Micrófono"]');
 const micBody = () => q<HTMLElement>('[aria-labelledby="mic-title"] .panel-body');
 const banner = () => q<HTMLElement>(".banner-slot");
 const lastSaved = () =>
@@ -144,7 +144,7 @@ describe("the microphone section", () => {
     const view = await mount(micSettings({ enabled: true }));
     view.onShow();
     await settle();
-    const options = qa<HTMLOptionElement>("select option").map((o) => o.textContent);
+    const options = qa<HTMLOptionElement>('select[aria-label="Micrófono"] option').map((o) => o.textContent);
     expect(options).toEqual([
       "Predeterminado del sistema",
       "Micrófono integrado (predeterminado)",
@@ -165,7 +165,7 @@ describe("the microphone section", () => {
     const view = await mount(micSettings({ enabled: true, deviceId: "gone" }));
     view.onShow();
     await settle();
-    const labels = qa<HTMLOptionElement>("select option").map((o) => o.textContent);
+    const labels = qa<HTMLOptionElement>('select[aria-label="Micrófono"] option').map((o) => o.textContent);
     expect(labels).toContain("Micrófono guardado (no conectado)");
     expect(deviceSelect().value).toBe("gone");
   });
@@ -533,6 +533,203 @@ describe("the save-clip shortcut", () => {
     await settle();
     expect(api.updateSettings).not.toHaveBeenCalled();
     expect(saveButton().textContent).toBe("⇧⌘S");
+  });
+});
+
+describe("save shortcuts with their own length", () => {
+  const keydown = (init: KeyboardEventInit & { code: string }) =>
+    window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+  const mainLength = () => q<HTMLSelectElement>('select[aria-label="Duración del clip"]');
+  const extraLengths = () =>
+    qa<HTMLSelectElement>('select[aria-label="Duración del clip de este atajo"]');
+  const extraButton = (i: number) => q<HTMLButtonElement>(`[data-shortcut="save-extra-${i}"]`);
+  const extraNote = (i: number) => q(`[data-shortcut-note="save-extra-${i}"]`);
+  const addButton = () => q<HTMLButtonElement>("[data-add-shortcut]");
+  const addRow = () => addButton().closest(".row") as HTMLElement;
+  const removeButton = (i: number) => q<HTMLButtonElement>(`[data-remove-extra="${i}"]`);
+  const shortcutsText = () => q('[aria-labelledby="shortcuts-title"]').textContent;
+  const optionLabels = (select: HTMLSelectElement) =>
+    [...select.options].map((o) => o.textContent);
+  const pick = (select: HTMLSelectElement, seconds: number) => {
+    select.value = String(seconds);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const withExtras = (extras: { accelerator: string; seconds: number }[], clipSeconds = 30) => {
+    const s = defaultSettings();
+    return { ...s, shortcuts: { ...s.shortcuts, clipSeconds, extraSaveClip: extras } };
+  };
+
+  it("offers the usual lengths and says how much the main shortcut keeps", async () => {
+    await mount();
+    expect(optionLabels(mainLength())).toEqual(["15 s", "30 s", "1 min", "2 min"]);
+    expect(mainLength().value).toBe("30");
+    expect(shortcutsText()).toContain("Guarda los últimos 30 s del buffer");
+    expect(extraLengths()).toHaveLength(0);
+  });
+
+  it("changes the main length without touching the keys or the microphone", async () => {
+    await mount(micSettings({ enabled: true, gainPercent: 130 }));
+    pick(mainLength(), 60);
+    await settle();
+    expect(lastSaved().shortcuts.clipSeconds).toBe(60);
+    expect(lastSaved().shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
+    expect(lastSaved().microphone.gainPercent).toBe(130);
+    expect(shortcutsText()).toContain("Guarda los últimos 1 min del buffer");
+  });
+
+  it("shows a length set by hand along with the usual ones", async () => {
+    await mount(withExtras([], 45));
+    expect(optionLabels(mainLength())).toEqual(["15 s", "30 s", "45 s", "1 min", "2 min"]);
+    expect(mainLength().value).toBe("45");
+  });
+
+  it("adds a shortcut: choose the keys and it is saved with its length", async () => {
+    await mount();
+    expect(addRow().hidden).toBe(false);
+    addButton().click();
+    // The new row is already listening for its keys, and the add button waits.
+    expect(extraButton(0).textContent).toBe("Presioná la combinación…");
+    expect(addRow().hidden).toBe(true);
+    expect(api.updateSettings).not.toHaveBeenCalled();
+
+    keydown({ code: "F9", key: "F9" });
+    await settle();
+    expect(lastSaved().shortcuts.extraSaveClip).toEqual([{ accelerator: "F9", seconds: 15 }]);
+    expect(extraButton(0).textContent).toBe("F9");
+    expect(shortcutsText()).toContain("Guarda los últimos 15 s del buffer");
+    expect(addRow().hidden).toBe(false);
+  });
+
+  it("a new shortcut can take another length before its keys are chosen", async () => {
+    await mount();
+    addButton().click();
+    pick(extraLengths()[0], 120);
+    extraButton(0).click(); // starts (or restarts) recording
+    keydown({ code: "F10", key: "F10" });
+    await settle();
+    expect(lastSaved().shortcuts.extraSaveClip).toEqual([{ accelerator: "F10", seconds: 120 }]);
+  });
+
+  it("changes the length of a saved shortcut in place", async () => {
+    await mount(withExtras([{ accelerator: "F9", seconds: 15 }]));
+    const select = extraLengths()[0];
+    expect(select.value).toBe("15");
+    pick(select, 120);
+    await settle();
+    expect(lastSaved().shortcuts.extraSaveClip).toEqual([{ accelerator: "F9", seconds: 120 }]);
+    expect(extraLengths()[0]).toBe(select); // not rebuilt: keeps its focus
+    expect(shortcutsText()).toContain("Guarda los últimos 2 min del buffer");
+  });
+
+  it("re-records the keys of a saved shortcut and keeps its length", async () => {
+    await mount(withExtras([{ accelerator: "F9", seconds: 15 }]));
+    extraButton(0).click();
+    keydown({ code: "F8", key: "F8", altKey: true });
+    await settle();
+    expect(lastSaved().shortcuts.extraSaveClip).toEqual([{ accelerator: "Alt+F8", seconds: 15 }]);
+    expect(extraButton(0).textContent).toBe("⌥F8");
+  });
+
+  it("removes one shortcut and leaves the others", async () => {
+    await mount(
+      withExtras([
+        { accelerator: "F9", seconds: 15 },
+        { accelerator: "F10", seconds: 60 },
+      ]),
+    );
+    removeButton(0).click();
+    await settle();
+    expect(lastSaved().shortcuts.extraSaveClip).toEqual([{ accelerator: "F10", seconds: 60 }]);
+    expect(extraButton(0).textContent).toBe("F10");
+    expect(qa("[data-remove-extra]")).toHaveLength(1);
+  });
+
+  it("refuses keys another shortcut uses, naming it and its length", async () => {
+    await mount(withExtras([{ accelerator: "F9", seconds: 15 }], 60));
+    addButton().click();
+    // The main shortcut...
+    keydown({ code: "KeyS", key: "s", metaKey: true, shiftKey: true });
+    expect(extraNote(1).textContent).toContain("Guardar clip (1 min)");
+    // ...the other extra...
+    keydown({ code: "F9", key: "F9" });
+    expect(extraNote(1).textContent).toContain("Guardar clip (15 s)");
+    // ...and the microphone's.
+    keydown({ code: "KeyM", key: "m", metaKey: true, shiftKey: true });
+    expect(extraNote(1).textContent).toContain("Silenciar el micrófono");
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(extraButton(1).textContent).toBe("Presioná la combinación…");
+  });
+
+  it("an existing shortcut may be re-recorded onto its own keys", async () => {
+    await mount(withExtras([{ accelerator: "F9", seconds: 15 }]));
+    extraButton(0).click();
+    keydown({ code: "F9", key: "F9" });
+    await settle();
+    expect(extraNote(0).textContent).not.toContain("ya lo usa");
+  });
+
+  it("the main shortcut cannot take the keys of an extra one", async () => {
+    await mount(withExtras([{ accelerator: "F9", seconds: 15 }]));
+    q<HTMLButtonElement>('[data-shortcut="save-clip"]').click();
+    keydown({ code: "F9", key: "F9" });
+    expect(q('[data-shortcut-note="save-clip"]').textContent).toContain("Guardar clip (15 s)");
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("a new shortcut left without keys can be dropped, and nothing is saved", async () => {
+    await mount();
+    addButton().click();
+    keydown({ code: "Escape", key: "Escape" });
+    expect(extraButton(0).textContent).toBe("Elegí una tecla");
+    removeButton(0).click();
+    await settle();
+    expect(qa("[data-remove-extra]")).toHaveLength(0);
+    expect(addRow().hidden).toBe(false);
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("stops offering more at the limit", async () => {
+    const keys = ["F5", "F6", "F7", "F8"];
+    await mount(withExtras(keys.map((accelerator) => ({ accelerator, seconds: 15 }))));
+    expect(qa("[data-remove-extra]")).toHaveLength(4);
+    expect(addRow().hidden).toBe(true);
+    removeButton(3).click();
+    await settle();
+    expect(addRow().hidden).toBe(false);
+  });
+
+  it("puts a refused shortcut back the way it was", async () => {
+    await mount();
+    api.updateSettings.mockRejectedValueOnce("no se pudo registrar el atajo «F9»");
+    addButton().click();
+    keydown({ code: "F9", key: "F9" });
+    await settle();
+    expect(q("#toasts").textContent).toContain("no se pudo registrar");
+    expect(qa("[data-remove-extra]")).toHaveLength(0);
+    expect(addRow().hidden).toBe(false);
+  });
+
+  it("follows a change made elsewhere", async () => {
+    await mount();
+    listeners.settings.forEach((cb) =>
+      cb(withExtras([{ accelerator: "F9", seconds: 120 }], 15)),
+    );
+    await settle();
+    expect(mainLength().value).toBe("15");
+    expect(extraButton(0).textContent).toBe("F9");
+    expect(extraLengths()[0].value).toBe("120");
+  });
+
+  it("leaving the screen drops a row that was still waiting for keys", async () => {
+    const view = await mount();
+    view.onShow();
+    addButton().click();
+    view.onHide();
+    keydown({ code: "F9", key: "F9" });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(qa("[data-remove-extra]")).toHaveLength(0);
   });
 });
 

@@ -4,7 +4,7 @@ import { clipCountLabel, groupByDay, type ClipInfo } from "../lib/clips";
 import { applyFilter, layoutFor } from "../lib/filter";
 import type { FolderInfo } from "../lib/folders";
 import { displayAccelerator } from "../lib/hotkey";
-import { DEFAULT_SAVE_SHORTCUT } from "../lib/settings";
+import { DEFAULT_CLIP_SECONDS, DEFAULT_SAVE_SHORTCUT, formatClipLength } from "../lib/settings";
 import { createClipCards } from "./clipcard";
 import { h, svg } from "./dom";
 import { createFilterBar } from "./filterbar";
@@ -17,8 +17,11 @@ export interface Gallery {
   /** Highlight a freshly saved clip (call before `refresh`). */
   markFresh(name: string): void;
   setBufferStatus(status: BufferStatus): void;
-  /** The global shortcut that saves a clip changed: show the new one. */
-  setSaveShortcut(accelerator: string): void;
+  /**
+   * The global shortcut that saves a clip (or how much it saves) changed: show
+   * the new one. Without `clipSeconds` the length is left as it was.
+   */
+  setSaveShortcut(accelerator: string, clipSeconds?: number): void;
 }
 
 export function createGallery(root: HTMLElement): Gallery {
@@ -29,6 +32,7 @@ export function createGallery(root: HTMLElement): Gallery {
   let requestSeq = 0;
   let headerEl: HTMLElement | null = null;
   let saveShortcut = DEFAULT_SAVE_SHORTCUT;
+  let clipSeconds = DEFAULT_CLIP_SECONDS;
   const fresh = new Set<string>();
 
   const hotkeyLabel = () =>
@@ -98,7 +102,7 @@ export function createGallery(root: HTMLElement): Gallery {
           "button",
           {
             class: "btn btn-primary",
-            title: "Guardar los últimos 30 s",
+            title: `Guardar los últimos ${formatClipLength(clipSeconds)}`,
             onclick: () => void api.saveClip(),
           },
           svg(icons.record),
@@ -226,9 +230,10 @@ export function createGallery(root: HTMLElement): Gallery {
   return {
     refresh,
     markFresh: (name) => fresh.add(name),
-    setSaveShortcut(accelerator) {
-      if (accelerator === saveShortcut) return;
+    setSaveShortcut(accelerator, seconds = clipSeconds) {
+      if (accelerator === saveShortcut && seconds === clipSeconds) return;
       saveShortcut = accelerator;
+      clipSeconds = seconds;
       if (loaded && clips.length === 0) {
         render(); // the empty state mentions it too
       } else if (headerEl) {
