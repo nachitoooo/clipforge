@@ -10,6 +10,15 @@ ShadowPlay, without an account and without leaving your machine.
 
 **Stack:** Rust core (per-OS capture and hardware encoding) · Tauri 2 + TypeScript UI.
 
+## Download
+
+Ready-to-run files are on the [Releases page](https://github.com/nachitoooo/clipforge/releases):
+a Windows installer, a portable Windows `.exe` (double-click, nothing to install)
+and a macOS `.dmg` (Apple silicon). **Recording works on macOS only for now**: the
+Windows files open the interface but can't record yet (see Status below). They are
+not signed, so Windows SmartScreen and macOS Gatekeeper warn the first time; the
+release notes say how to get past that.
+
 ## What it does today
 
 - **Replay buffer** that keeps *encoded* frames (about 100 MB for two minutes of

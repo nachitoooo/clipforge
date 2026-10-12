@@ -10,7 +10,7 @@ trim, organize and share. Everything stays on your computer. The app is in Spani
 |---|---|---|
 | `ClipForge_*_x64-setup.exe` | Windows 10/11 | Double-click, it installs and adds a Start menu entry |
 | `ClipForge-portable-x64.exe` | Windows 10/11 | Double-click, nothing to install (needs the WebView2 runtime, already part of Windows 11 and most Windows 10) |
-| `ClipForge_*_aarch64.dmg` | Apple silicon Macs | Open it and drag ClipForge to Applications |
+| `ClipForge_*_aarch64.dmg` | Apple silicon Macs, macOS 13 or newer | Open it and drag ClipForge to Applications |
 
 ### ⚠️ Read this first
 
@@ -24,7 +24,8 @@ trim, organize and share. Everything stays on your computer. The app is in Spani
   - macOS: right-click ClipForge → **Open** (or, if it says the app is damaged, run
     `xattr -dr com.apple.quarantine /Applications/ClipForge.app`).
 - macOS asks for **Screen Recording** the first time (and **Microphone** only if you
-  turn the microphone on). Screenshots need macOS 14 or newer.
+  turn the microphone on). Screenshots need macOS 14 or newer; Intel Macs have no
+  download yet.
 
 ### What it does today (macOS)
 
