@@ -166,10 +166,83 @@ impl Recorder {
         Ok(())
     }
 
+    /// Start the replay buffer on Windows: Graphics Capture of the primary
+    /// monitor, WASAPI loopback for the sound, and the Media Foundation
+    /// encoders for both.
+    #[cfg(target_os = "windows")]
+    pub fn start(&self) -> Result<(), String> {
+        use clipforge_core::audio::aac_mediafoundation::MediaFoundationAacEncoder;
+        use clipforge_core::audio::wasapi::WasapiLoopbackSource;
+        use clipforge_core::audio::{AudioConfig, AudioEncoder};
+        use clipforge_core::capture::clock::SharedEpoch;
+        use clipforge_core::capture::combined::WithAudio;
+        use clipforge_core::capture::scale::fit_even;
+        use clipforge_core::capture::windows::{
+            primary_display_size, WindowsCaptureConfig, WindowsGraphicsCaptureSource,
+        };
+        use clipforge_core::capture::FrameSource;
+        use clipforge_core::encode::mediafoundation::MediaFoundationEncoder;
+        use clipforge_core::encode::EncoderConfig;
+
+        // The screen's own shape, shrunk to fit 1080p: a laptop's 1366x768 stays
+        // as it is, a 4K monitor is recorded at 1920x1080.
+        let (screen_w, screen_h) = primary_display_size().map_err(|e| e.to_string())?;
+        let defaults = EncoderConfig::default();
+        let (width, height) = fit_even(screen_w, screen_h, defaults.width, defaults.height);
+        let config = EncoderConfig {
+            width,
+            height,
+            ..defaults
+        };
+
+        // Sound is best effort: without an AAC encoder the clips are silent
+        // instead of the whole buffer refusing to start.
+        let audio_encoder: Option<Box<dyn AudioEncoder>> =
+            match MediaFoundationAacEncoder::new(AudioConfig::default()) {
+                Ok(encoder) => Some(Box::new(encoder)),
+                Err(e) => {
+                    eprintln!("clipforge: AAC encoder unavailable, clips will be silent: {e}");
+                    None
+                }
+            };
+
+        let epoch = SharedEpoch::new();
+        let video = WindowsGraphicsCaptureSource::new(
+            WindowsCaptureConfig {
+                width,
+                height,
+                fps: config.fps,
+                show_cursor: true,
+            },
+            epoch.clone(),
+        );
+        let source: Box<dyn FrameSource> = if audio_encoder.is_some() {
+            Box::new(WithAudio::new(
+                video,
+                WasapiLoopbackSource::new(AudioConfig::default(), epoch),
+            ))
+        } else {
+            Box::new(video)
+        };
+        let encoder = MediaFoundationEncoder::new(config).map_err(|e| e.to_string())?;
+        self.engine
+            .lock()
+            .expect("engine lock")
+            .start_with_audio(
+                source,
+                Box::new(encoder),
+                audio_encoder,
+                Arc::clone(&self.clips),
+            )
+            .map_err(|e| e.to_string())?;
+        self.start_activity_tracker();
+        Ok(())
+    }
+
     /// Start noticing which application is in front; a new buffer is a new
     /// timeline, so what was seen before is forgotten. Best effort: a source
     /// that can't be had only means clips carry no game.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     fn start_activity_tracker(&self) {
         let mut slot = self.tracker.lock().expect("tracker lock");
         *slot = None; // stop a previous one before starting over
@@ -201,14 +274,9 @@ impl Recorder {
             .map(|app| app.name)
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     pub fn start(&self) -> Result<(), String> {
-        // Shown to whoever runs the Windows build, so no ticket numbers.
-        Err(
-            "la grabación todavía no está disponible en Windows: esta versión solo \
-             muestra la interfaz. Está en desarrollo; por ahora graba en macOS."
-                .into(),
-        )
+        Err("la grabación todavía no está disponible en este sistema operativo".into())
     }
 
     /// Stop capturing; the buffered window survives so a clip can still be

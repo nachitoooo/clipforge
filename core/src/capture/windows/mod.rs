@@ -361,6 +361,41 @@ impl Session {
     }
 }
 
+/// One picture of the primary monitor at its own size, as tightly packed BGRA
+/// plus its width and height. Graphics Capture hands over a frame as soon as it
+/// starts, even if nothing on screen changes; `timeout` is how long to wait for it.
+pub fn capture_one_frame(timeout: Duration) -> Result<(Vec<u8>, u32, u32), CaptureError> {
+    let wake = Arc::new((Mutex::new(false), Condvar::new()));
+    let config = WindowsCaptureConfig {
+        show_cursor: true,
+        ..WindowsCaptureConfig::default()
+    };
+    let mut session = Session::open(&config, Arc::clone(&wake))?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Ok(frame) = session.pool.TryGetNextFrame() {
+            let content = frame
+                .ContentSize()
+                .map_err(|e| backend("content size", e))?;
+            let (width, height) = (content.Width.max(2) as u32, content.Height.max(2) as u32);
+            let data = session.read_frame(&frame, width, height)?;
+            return Ok((data, width, height));
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err(CaptureError::Backend(
+                "la pantalla no entregó ninguna imagen".into(),
+            ));
+        }
+        let (flag, signal) = &*wake;
+        let mut ready = flag.lock().expect("wake lock");
+        if !*ready {
+            ready = signal.wait_timeout(ready, left).expect("wake wait").0;
+        }
+        *ready = false;
+    }
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.pool.RemoveFrameArrived(self.handler_token);

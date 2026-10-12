@@ -50,7 +50,8 @@ fn backend(context: &str, e: windows::core::Error) -> AudioError {
 }
 
 pub struct MediaFoundationAacEncoder {
-    transform: IMFTransform,
+    /// Released by hand in `Drop`, before Media Foundation is shut down.
+    transform: ManuallyDrop<IMFTransform>,
     config: AudioConfig,
     /// Timestamp of the first sample fed since the last (re)start.
     base: Option<Duration>,
@@ -175,7 +176,7 @@ impl MediaFoundationAacEncoder {
                 .map_err(|e| backend("start of stream", e))?;
 
             Ok(Self {
-                transform,
+                transform: ManuallyDrop::new(transform),
                 config,
                 base: None,
                 fed_frames: 0,
@@ -352,9 +353,10 @@ impl AudioEncoder for MediaFoundationAacEncoder {
 
 impl Drop for MediaFoundationAacEncoder {
     fn drop(&mut self) {
-        // SAFETY: balances the MFStartup in `new`. The transform is released
-        // by its own `Drop` after this.
+        // SAFETY: the transform is dropped exactly once, here, and never used
+        // again; the MFShutdown balances the MFStartup in `new`.
         unsafe {
+            ManuallyDrop::drop(&mut self.transform);
             let _ = MFShutdown();
         }
     }

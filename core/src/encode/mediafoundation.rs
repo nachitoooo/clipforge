@@ -96,7 +96,10 @@ fn video_type(subtype: &GUID, config: &EncoderConfig) -> Result<IMFMediaType, En
 }
 
 pub struct MediaFoundationEncoder {
-    transform: IMFTransform,
+    /// Released by hand in `Drop`, *before* Media Foundation is shut down: the
+    /// encoder runs on the platform's work-queue threads, which `MFShutdown`
+    /// tears down.
+    transform: ManuallyDrop<IMFTransform>,
     config: EncoderConfig,
     parameter_sets: Option<ParameterSets>,
     /// Reused between frames.
@@ -236,7 +239,7 @@ impl MediaFoundationEncoder {
                 .map_err(|e| backend("start of stream", e))?;
 
             Ok(Self {
-                transform,
+                transform: ManuallyDrop::new(transform),
                 nv12: vec![0; nv12_len(config.width as usize, config.height as usize)],
                 config,
                 parameter_sets: None,
@@ -448,9 +451,10 @@ impl Encoder for MediaFoundationEncoder {
 
 impl Drop for MediaFoundationEncoder {
     fn drop(&mut self) {
-        // SAFETY: balances the MFStartup in `new`. The transform is released by
-        // its own `Drop` after this.
+        // SAFETY: the transform is dropped exactly once, here, and never used
+        // again; the MFShutdown balances the MFStartup in `new`.
         unsafe {
+            ManuallyDrop::drop(&mut self.transform);
             let _ = MFShutdown();
         }
     }

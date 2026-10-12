@@ -2,14 +2,16 @@
 //!
 //! * macOS: `SCScreenshotManager` (macOS 14+), the whole first display, without
 //!   ClipForge's own windows in it.
-//! * Windows: not yet — it waits for the Windows capture (F-2.4), which will give
-//!   it one frame of Graphics Capture.
+//! * Windows: one frame of Graphics Capture of the primary monitor, written with
+//!   the `png` crate.
 //!
 //! The picture is written to a `.part` file and renamed when complete, so a
 //! failure never leaves half a PNG that the library would list.
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -80,7 +82,12 @@ fn platform_capture(path: &Path) -> Result<Screenshot, CaptureError> {
     macos::capture_png(path)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn platform_capture(path: &Path) -> Result<Screenshot, CaptureError> {
+    windows::capture_png(path)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn platform_capture(_path: &Path) -> Result<Screenshot, CaptureError> {
     Err(CaptureError::Backend(
         "las capturas de pantalla todavía no están disponibles en este sistema".to_string(),
@@ -195,7 +202,7 @@ mod tests {
         assert_ne!(part.extension().and_then(|e| e.to_str()), Some("png"));
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     #[test]
     fn without_a_capture_backend_it_says_so_and_leaves_nothing_behind() {
         let dir = Scratch::new("unsupported");
