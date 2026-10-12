@@ -14,6 +14,7 @@ import {
 } from "../lib/filter";
 import { sortFolders, type FolderInfo } from "../lib/folders";
 import { h, svg } from "./dom";
+import { createDropdown, type DropdownOption } from "./dropdown";
 import { icons } from "./icons";
 
 export interface FilterBarOptions {
@@ -39,10 +40,7 @@ export interface FilterBar {
   keepFocus(change: () => void): void;
 }
 
-function option(value: string, label: string): HTMLOptionElement {
-  const el = h("option", { value }, label);
-  return el;
-}
+const option = (value: string, label: string): DropdownOption => ({ value, label });
 
 export function createFilterBar(options: FilterBarOptions): FilterBar {
   const state: ClipFilter = emptyFilter();
@@ -55,11 +53,45 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     "aria-label": "Buscar clips",
     spellcheck: "false",
   });
-  const gameSelect = h("select", { class: "select select-sm", "aria-label": "Juego" });
-  const folderSelect = h("select", { class: "select select-sm", "aria-label": "Carpeta" });
-  const kindSelect = h("select", { class: "select select-sm", "aria-label": "Tipo" });
-  const rangeSelect = h("select", { class: "select select-sm", "aria-label": "Fecha" });
-  const sortSelect = h("select", { class: "select select-sm", "aria-label": "Ordenar por" });
+  // `""` is "all" for the game and the folder; NONE is "the ones without".
+  const gameSelect = createDropdown({
+    label: "Juego",
+    onChange(value) {
+      state.game = value === "" ? null : value;
+      changed();
+    },
+  });
+  const folderSelect = createDropdown({
+    label: "Carpeta",
+    onChange(value) {
+      state.folder = value === "" ? null : value;
+      changed();
+    },
+  });
+  const kindSelect = createDropdown({
+    label: "Tipo",
+    options: KIND_OPTIONS.map((kind) => option(kind.id, kind.label)),
+    onChange(value) {
+      state.kind = value as KindFilter;
+      changed();
+    },
+  });
+  const rangeSelect = createDropdown({
+    label: "Fecha",
+    options: RANGE_OPTIONS.map((range) => option(range.id, range.label)),
+    onChange(value) {
+      state.range = value as DateRange;
+      changed();
+    },
+  });
+  const sortSelect = createDropdown({
+    label: "Ordenar por",
+    options: SORT_OPTIONS.map((sort) => option(sort.id, sort.label)),
+    onChange(value) {
+      state.sort = value as SortKey;
+      changed();
+    },
+  });
   const status = h("span", { class: "filter-status muted" });
   const clear = h(
     "button",
@@ -68,19 +100,15 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     "Limpiar",
   );
 
-  for (const kind of KIND_OPTIONS) kindSelect.append(option(kind.id, kind.label));
-  for (const range of RANGE_OPTIONS) rangeSelect.append(option(range.id, range.label));
-  for (const sort of SORT_OPTIONS) sortSelect.append(option(sort.id, sort.label));
-
   const el = h(
     "div",
     { class: "filterbar", role: "search" },
     h("div", { class: "search-field" }, svg(icons.search), search),
-    gameSelect,
-    options.folderSelector ? folderSelect : null,
-    kindSelect,
-    rangeSelect,
-    sortSelect,
+    gameSelect.el,
+    options.folderSelector ? folderSelect.el : null,
+    kindSelect.el,
+    rangeSelect.el,
+    sortSelect.el,
     status,
     clear,
   );
@@ -103,42 +131,21 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
       changed();
     }
   });
-  gameSelect.addEventListener("change", () => {
-    state.game = gameSelect.value === "" ? null : gameSelect.value;
-    changed();
-  });
-  folderSelect.addEventListener("change", () => {
-    state.folder = folderSelect.value === "" ? null : folderSelect.value;
-    changed();
-  });
-  kindSelect.addEventListener("change", () => {
-    state.kind = kindSelect.value as KindFilter;
-    changed();
-  });
-  rangeSelect.addEventListener("change", () => {
-    state.range = rangeSelect.value as DateRange;
-    changed();
-  });
-  sortSelect.addEventListener("change", () => {
-    state.sort = sortSelect.value as SortKey;
-    changed();
-  });
-
   /** A selector that narrows the list is drawn differently from one left on "all". */
   function markActive() {
-    gameSelect.classList.toggle("is-set", state.game !== null);
-    folderSelect.classList.toggle("is-set", state.folder !== null);
-    kindSelect.classList.toggle("is-set", state.kind !== "all");
-    rangeSelect.classList.toggle("is-set", state.range !== "all");
+    gameSelect.el.classList.toggle("is-set", state.game !== null);
+    folderSelect.el.classList.toggle("is-set", state.folder !== null);
+    kindSelect.el.classList.toggle("is-set", state.kind !== "all");
+    rangeSelect.el.classList.toggle("is-set", state.range !== "all");
   }
 
   function syncControls() {
     search.value = state.query;
-    gameSelect.value = state.game ?? "";
-    folderSelect.value = state.folder ?? "";
-    kindSelect.value = state.kind;
-    rangeSelect.value = state.range;
-    sortSelect.value = state.sort;
+    gameSelect.setValue(state.game ?? "");
+    folderSelect.setValue(state.folder ?? "");
+    kindSelect.setValue(state.kind);
+    rangeSelect.setValue(state.range);
+    sortSelect.setValue(state.sort);
     clear.hidden = !isFiltering(state);
     markActive();
   }
@@ -163,28 +170,35 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     setData({ clips, folders }) {
       // Nothing to choose between until there is a screenshot.
       mixed = clips.some((c) => c.kind === "screenshot");
-      kindSelect.hidden = !mixed;
-      if (!mixed) state.kind = "all";
+      kindSelect.el.hidden = !mixed;
+      if (!mixed) {
+        state.kind = "all";
+        kindSelect.close();
+      }
 
       const { games, withoutGame } = gameOptions(clips);
-      gameSelect.replaceChildren(option("", "Todos los juegos"));
-      for (const game of games) gameSelect.append(option(game.key, `${game.name} (${game.count})`));
-      if (games.length > 0 && withoutGame > 0) {
-        gameSelect.append(option(NONE, `Sin juego (${withoutGame})`));
-      }
+      const gameChoices = [
+        option("", "Todos los juegos"),
+        ...games.map((game) => option(game.key, `${game.name} (${game.count})`)),
+      ];
+      if (games.length > 0 && withoutGame > 0) gameChoices.push(option(NONE, `Sin juego (${withoutGame})`));
+      gameSelect.setOptions(gameChoices);
       // Nothing to choose between when no clip has a game.
-      gameSelect.hidden = games.length === 0;
+      gameSelect.el.hidden = games.length === 0;
+      if (games.length === 0) gameSelect.close();
       const gameStillThere =
         state.game === null || [...games.map((g) => g.key), NONE].includes(state.game);
       if (!gameStillThere) state.game = null;
 
       const loose = clips.filter((c) => c.folders.length === 0).length;
-      folderSelect.replaceChildren(option("", "Todas las carpetas"));
-      for (const folder of sortFolders(folders)) {
-        folderSelect.append(option(folder.id, `${folder.name} (${folder.clipCount})`));
-      }
-      if (folders.length > 0) folderSelect.append(option(NONE, `Sin carpeta (${loose})`));
-      folderSelect.hidden = folders.length === 0;
+      const folderChoices = [
+        option("", "Todas las carpetas"),
+        ...sortFolders(folders).map((folder) => option(folder.id, `${folder.name} (${folder.clipCount})`)),
+      ];
+      if (folders.length > 0) folderChoices.push(option(NONE, `Sin carpeta (${loose})`));
+      folderSelect.setOptions(folderChoices);
+      folderSelect.el.hidden = folders.length === 0;
+      if (folders.length === 0) folderSelect.close();
       const folderStillThere =
         state.folder === null || state.folder === NONE || folders.some((f) => f.id === state.folder);
       if (!folderStillThere) state.folder = null;

@@ -128,7 +128,24 @@ app settings.
 - [x] Rail: marker on the active item, glow on the logo; cards lift on hover, a shade under the duration badge, actions that slide in; day titles with a rule; primary buttons with a gradient and glow; key-cap shortcut buttons; panel titles on a tinted tile; dialogs and the player pop in over a blurred backdrop
 - [x] Looked at in headless Chrome over a mock backend: Recientes, Biblioteca, a folder, Configuración, the player, the editor, the folder / game / low RAM dialogs, filters on, empty library, and a 780 px window
 - [ ] Manual check in the real app, in WebView2 (Windows) and WKWebView (macOS): the font, the blurred backdrops, the scrollbars and the native dropdown list of the selectors
-- [ ] Not yet: a light theme, a labelled (wide) sidebar, thumbnails that preview more than one frame, motion between views
+- [ ] Not yet: a labelled (wide) sidebar, thumbnails that preview more than one frame, motion between views (the light theme and the choice of color came next: F-3.16)
+
+## F-3.16 — Light theme, main color, drop-down filters
+> **Progress (2026-10-12):** implemented. Settings → Apariencia: the theme
+> (Sistema / Oscuro / Claro) and the main color (nine swatches or any `#rrggbb`),
+> both applied at once. The filters of Recientes and Biblioteca are drop-down
+> lists of our own instead of the browser's `<select>`. The solid orange fill is
+> gone from the buttons: the main action is a colored line and text.
+- [x] `settings.appearance { theme, accent }` in Rust: defaults (dark, `#ff7a1a`), old files get them, `Settings::validated` lowercases the color and puts an unknown theme or a bad color back to the default, changing it never restarts the capture
+- [x] `lib/theme.ts` (pure, tested): the same color rule as Rust, WCAG contrast, `readableAccent` (the accent as text or a line is darkened on light / lightened on dark until it reads at 4.5:1 — yellow on white would not), `accentVars`, `resolveScheme`
+- [x] `ui/appearance.ts`: `data-theme` and the accent as custom properties on the root; `system` follows the operating system while the app is open; applied at start and on every `settings-changed`
+- [x] Stylesheet: a set of tokens per theme (`:root` and `:root[data-theme="light"]`), the accent derived with `color-mix` (soft tint, focus ring, glow); glass over pictures, the video stage and the thumbnails stay dark in both themes
+- [x] Settings → Apariencia (first panel): segmented theme control, swatches, a hex box that saves only a complete color and puts the real one back on leaving; tests for each path, including a failed save
+- [x] `ui/dropdown.ts` (tested): trigger + floating list with a tick on the choice, arrows / Home / End / Enter / Space / Escape / Tab, typing to jump, opens upwards when there is no room, closes on an outside click, scroll or resize, one open at a time, Escape does not reach a player or editor behind it; the filter bar uses it and a filter that narrows the list is drawn in the accent
+- [x] No filled accent on buttons (the main action, the editor's play button, the active section, selected cards)
+- [x] Looked at in headless Chrome over a mock backend: dark and light, orange / blue / green, the lists open, filters on, the editor, a dialog, and `system` with the OS switched both ways
+- [ ] Manual check in the real app (WebView2 and WKWebView): the theme and color change, the lists near the window's edge, `system` when the OS theme changes
+- [ ] Not yet: the two selects in Settings (microphone, clip length) are still the browser's; the system's own title bar and the tray menu do not follow the theme
 
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented

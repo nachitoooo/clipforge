@@ -65,7 +65,7 @@ hotkey saves the last N seconds as a clip.
   before the requested start and a video edit list hides the extra frames, so
   the start is frame accurate. Never re-encode; audio waveforms are decoded in
   Rust (`symphonia`).
-- **UI:** Tauri 2 + TypeScript, no framework (clips gallery, library folders, trim editor, settings, hotkeys). The look is set by the tokens in `:root` of `app/src/styles.css` (surfaces, borders, radius, shadows, Inter bundled); new views reuse them instead of hard-coding colors.
+- **UI:** Tauri 2 + TypeScript, no framework (clips gallery, library folders, trim editor, settings, hotkeys). The look is set by the tokens in `:root` of `app/src/styles.css` (surfaces, borders, radius, shadows, Inter bundled); new views reuse them instead of hard-coding colors. The theme (`:root[data-theme="light"]` has its own set) and the main color are settings (`settings.appearance`), applied by `ui/appearance.ts`; the accent is only ever used as a line, a text or a tint, never as a button's fill. Drop-down lists use `ui/dropdown.ts`, not `<select>`.
 - **Global hotkeys:** `global-hotkey` crate.
 - **CI:** GitHub Actions matrix (`windows-latest`, `macos-latest`).
 

@@ -29,6 +29,11 @@ pub const MIN_CLIP_SECONDS: u64 = 5;
 pub const MAX_CLIP_SECONDS: u64 = 120;
 /// Save shortcuts besides the main one.
 pub const MAX_EXTRA_SAVE_SHORTCUTS: usize = 4;
+/// The themes the interface knows; `system` follows the operating system.
+pub const THEMES: [&str; 3] = ["system", "dark", "light"];
+pub const DEFAULT_THEME: &str = "dark";
+/// The main color of the interface: orange, as it has always been.
+pub const DEFAULT_ACCENT: &str = "#ff7a1a";
 
 /// How the microphone ends up in a saved clip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -161,6 +166,35 @@ pub struct PerformanceSettings {
     pub low_ram: bool,
 }
 
+/// How the window looks. Purely the interface's business: the Rust side only
+/// keeps it, checks it and tells every window when it changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AppearanceSettings {
+    /// One of [`THEMES`].
+    pub theme: String,
+    /// The main color, `#rrggbb` (lowercase once validated).
+    pub accent: String,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            theme: DEFAULT_THEME.to_string(),
+            accent: DEFAULT_ACCENT.to_string(),
+        }
+    }
+}
+
+/// `#RRGGBB` (or the same without the `#`) as lowercase `#rrggbb`; `None` for
+/// anything else, so a typo in a hand-edited file can't reach the stylesheet.
+pub fn normalize_accent(text: &str) -> Option<String> {
+    let text = text.trim();
+    let digits = text.strip_prefix('#').unwrap_or(text);
+    (digits.len() == 6 && digits.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| format!("#{}", digits.to_ascii_lowercase()))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -169,6 +203,7 @@ pub struct Settings {
     pub microphone: MicrophoneSettings,
     pub library: LibrarySettings,
     pub performance: PerformanceSettings,
+    pub appearance: AppearanceSettings,
 }
 
 impl Default for Settings {
@@ -179,6 +214,7 @@ impl Default for Settings {
             microphone: MicrophoneSettings::default(),
             library: LibrarySettings::default(),
             performance: PerformanceSettings::default(),
+            appearance: AppearanceSettings::default(),
         }
     }
 }
@@ -306,6 +342,17 @@ impl Settings {
             .take()
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty());
+
+        // Looks are never worth refusing a save over: what doesn't make sense
+        // goes back to the default.
+        let theme = self.appearance.theme.trim().to_ascii_lowercase();
+        self.appearance.theme = if THEMES.contains(&theme.as_str()) {
+            theme
+        } else {
+            DEFAULT_THEME.to_string()
+        };
+        self.appearance.accent =
+            normalize_accent(&self.appearance.accent).unwrap_or_else(|| DEFAULT_ACCENT.to_string());
 
         Ok(self)
     }
@@ -1179,6 +1226,77 @@ mod tests {
         assert!(SettingsStore::load(dir.file()).get().performance.low_ram);
         let json = serde_json::to_value(SettingsStore::load(dir.file()).get()).unwrap();
         assert_eq!(json["performance"]["lowRam"], true);
+    }
+
+    // ---- appearance ----
+
+    #[test]
+    fn the_look_starts_as_it_always_was_and_old_files_do_not_have_it() {
+        let a = Settings::default().appearance;
+        assert_eq!((a.theme.as_str(), a.accent.as_str()), ("dark", "#ff7a1a"));
+        let dir = TempDir::new("appearance-old");
+        fs::write(dir.file(), r#"{"performance":{"lowRam":true}}"#).unwrap();
+        assert_eq!(SettingsStore::load(dir.file()).get().appearance, a);
+    }
+
+    #[test]
+    fn a_color_is_accepted_with_or_without_the_hash_and_in_any_case() {
+        assert_eq!(normalize_accent("#FF7A1A").as_deref(), Some("#ff7a1a"));
+        assert_eq!(normalize_accent("  4da3ff ").as_deref(), Some("#4da3ff"));
+        for bad in [
+            "",
+            "#",
+            "#fff",
+            "#12345",
+            "#1234567",
+            "#gg0000",
+            "red",
+            "rgb(1,2,3)",
+            "##ff7a1a",
+        ] {
+            assert_eq!(normalize_accent(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn validation_normalizes_the_look_and_repairs_what_makes_no_sense() {
+        let mut s = Settings::default();
+        s.appearance.theme = " Light ".into();
+        s.appearance.accent = "#4DA3FF".into();
+        let ok = s.validated().unwrap();
+        assert_eq!(
+            (ok.appearance.theme.as_str(), ok.appearance.accent.as_str()),
+            ("light", "#4da3ff")
+        );
+
+        let mut s = Settings::default();
+        s.appearance.theme = "sepia".into();
+        s.appearance.accent = "javascript:alert(1)".into();
+        let repaired = s.validated().unwrap();
+        assert_eq!(repaired.appearance, AppearanceSettings::default());
+    }
+
+    #[test]
+    fn the_look_survives_a_restart_and_is_camel_case() {
+        let dir = TempDir::new("appearance-saved");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.appearance.theme = "system".into();
+        s.appearance.accent = "#a77bff".into();
+        store.replace(s.validated().unwrap()).unwrap();
+        let reloaded = SettingsStore::load(dir.file()).get();
+        assert_eq!(reloaded.appearance.theme, "system");
+        let json = serde_json::to_value(reloaded).unwrap();
+        assert_eq!(json["appearance"]["accent"], "#a77bff");
+    }
+
+    #[test]
+    fn changing_the_look_never_restarts_the_capture() {
+        let a = Settings::default();
+        let mut b = a.clone();
+        b.appearance.theme = "light".into();
+        b.appearance.accent = "#2ec4b6".into();
+        assert!(!Settings::needs_capture_restart(&a, &b));
     }
 
     #[test]

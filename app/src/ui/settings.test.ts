@@ -1062,3 +1062,150 @@ describe("the library section", () => {
     expect(text).toContain("esta computadora");
   });
 });
+
+describe("appearance", () => {
+  const panel = () => q<HTMLElement>('[aria-labelledby="appearance-title"]');
+  const themeButton = (id: string) => q<HTMLButtonElement>(`.segment[data-theme="${id}"]`);
+  const swatch = (hex: string) => q<HTMLButtonElement>(`.swatch[data-accent="${hex}"]`);
+  const hexInput = () => q<HTMLInputElement>('input[aria-label="Color en hexadecimal"]');
+  const checkedThemes = () => qa<HTMLButtonElement>(".segment").filter((b) => b.getAttribute("aria-checked") === "true");
+  const checkedSwatches = () =>
+    qa<HTMLButtonElement>(".swatch[data-accent]").filter((b) => b.getAttribute("aria-checked") === "true");
+  const withLook = (look: Partial<Settings["appearance"]>): Settings => {
+    const s = defaultSettings();
+    return { ...s, appearance: { ...s.appearance, ...look } };
+  };
+  const type = (text: string) => {
+    hexInput().value = text;
+    hexInput().dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  it("is the first panel", async () => {
+    await mount();
+    expect(q(".settings").firstElementChild).toBe(panel());
+    expect(panel().textContent).toContain("Apariencia");
+  });
+
+  it("starts as the app always looked: dark, orange", async () => {
+    await mount();
+    expect(checkedThemes().map((b) => b.dataset.theme)).toEqual(["dark"]);
+    expect(checkedSwatches().map((b) => b.dataset.accent)).toEqual(["#ff7a1a"]);
+    expect(hexInput().value).toBe("#ff7a1a");
+  });
+
+  it("offers the system, dark and light themes", async () => {
+    await mount();
+    expect(qa<HTMLButtonElement>(".segment").map((b) => b.textContent)).toEqual(["Sistema", "Oscuro", "Claro"]);
+  });
+
+  it("shows the saved look", async () => {
+    await mount(withLook({ theme: "light", accent: "#4da3ff" }));
+    expect(checkedThemes().map((b) => b.dataset.theme)).toEqual(["light"]);
+    expect(checkedSwatches().map((b) => b.dataset.accent)).toEqual(["#4da3ff"]);
+    expect(hexInput().value).toBe("#4da3ff");
+  });
+
+  it("choosing a theme saves it, and nothing else changes", async () => {
+    await mount();
+    themeButton("light").click();
+    await settle();
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    const saved = lastSaved();
+    expect(saved.appearance).toEqual({ theme: "light", accent: "#ff7a1a" });
+    expect(saved.microphone).toEqual(defaultSettings().microphone);
+    expect(saved.performance).toEqual(defaultSettings().performance);
+    expect(checkedThemes().map((b) => b.dataset.theme)).toEqual(["light"]);
+  });
+
+  it("choosing a swatch saves that color and keeps the theme", async () => {
+    await mount(withLook({ theme: "system" }));
+    swatch("#a77bff").click();
+    await settle();
+    expect(lastSaved().appearance).toEqual({ theme: "system", accent: "#a77bff" });
+    expect(checkedSwatches().map((b) => b.dataset.accent)).toEqual(["#a77bff"]);
+    expect(hexInput().value).toBe("#a77bff");
+  });
+
+  it("every swatch is a labelled radio button in a group", async () => {
+    await mount();
+    const swatches = qa<HTMLButtonElement>(".swatch[data-accent]");
+    expect(swatches.length).toBeGreaterThanOrEqual(8);
+    for (const button of swatches) {
+      expect(button.getAttribute("role")).toBe("radio");
+      expect(button.getAttribute("aria-label")).toBeTruthy();
+    }
+    expect(q('[role="radiogroup"][aria-label="Color principal"]')).not.toBeNull();
+    expect(q('[role="radiogroup"][aria-label="Tema"]')).not.toBeNull();
+  });
+
+  it("a typed color is saved once it is complete, in any case and with or without the hash", async () => {
+    await mount();
+    type("4DA3F");
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(hexInput().classList.contains("is-invalid")).toBe(true);
+    type("4DA3FF");
+    await settle();
+    expect(lastSaved().appearance.accent).toBe("#4da3ff");
+    expect(hexInput().classList.contains("is-invalid")).toBe(false);
+    expect(checkedSwatches().map((b) => b.dataset.accent)).toEqual(["#4da3ff"]);
+  });
+
+  it("a color that is not a swatch checks none of them", async () => {
+    await mount(withLook({ accent: "#123456" }));
+    expect(checkedSwatches()).toEqual([]);
+    expect(hexInput().value).toBe("#123456");
+  });
+
+  it("typing something that is not a color never saves it, and leaving the box puts the real one back", async () => {
+    await mount();
+    for (const bad of ["red", "#12345g", "ff7a1"]) {
+      type(bad);
+      await settle();
+    }
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    hexInput().dispatchEvent(new Event("blur"));
+    expect(hexInput().value).toBe("#ff7a1a");
+    expect(hexInput().classList.contains("is-invalid")).toBe(false);
+  });
+
+  it("an empty box is not an error while typing", async () => {
+    await mount();
+    type("");
+    expect(hexInput().classList.contains("is-invalid")).toBe(false);
+  });
+
+  it("does not wipe half a color when something else on the screen changes", async () => {
+    await mount();
+    hexInput().focus();
+    type("#4da");
+    listeners.status[0]({ ...healthy, enabled: true, active: true });
+    await settle();
+    expect(hexInput().value).toBe("#4da");
+  });
+
+  it("does not save the color it already has", async () => {
+    await mount();
+    type("#FF7A1A");
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("goes back to what it was when the save fails", async () => {
+    await mount();
+    api.updateSettings.mockRejectedValueOnce("no se pudo guardar");
+    themeButton("light").click();
+    await settle();
+    expect(q("#toasts").textContent).toContain("no se pudo guardar");
+    expect(checkedThemes().map((b) => b.dataset.theme)).toEqual(["dark"]);
+  });
+
+  it("follows a change made somewhere else", async () => {
+    await mount();
+    listeners.settings[0](withLook({ theme: "light", accent: "#2ec4b6" }));
+    await settle();
+    expect(checkedThemes().map((b) => b.dataset.theme)).toEqual(["light"]);
+    expect(checkedSwatches().map((b) => b.dataset.accent)).toEqual(["#2ec4b6"]);
+    expect(hexInput().value).toBe("#2ec4b6");
+  });
+});

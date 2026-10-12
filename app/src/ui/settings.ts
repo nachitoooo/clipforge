@@ -19,10 +19,12 @@ import {
   withAddedShortcut,
   withExtraShortcut,
   withMicrophone,
+  withAppearance,
   withLibrary,
   withPerformance,
   withShortcuts,
   withoutExtraShortcut,
+  type AppearanceSettings,
   type LibrarySettings,
   type MemoryPlans,
   type MicDevice,
@@ -32,7 +34,9 @@ import {
   type PerformanceSettings,
   type Settings,
   type ShortcutSettings,
+  type ThemeChoice,
 } from "../lib/settings";
+import { ACCENT_PRESETS, THEME_CHOICES, normalizeHex } from "../lib/theme";
 import { h, svg } from "./dom";
 import { icons } from "./icons";
 import { createShortcutRecorder, type ShortcutRecorder } from "./shortcut";
@@ -366,6 +370,100 @@ export function createSettings(root: HTMLElement): SettingsView {
     ),
   );
 
+  // ---- appearance panel -------------------------------------------------
+
+  const themeIcons: Record<ThemeChoice, string> = {
+    system: icons.monitor,
+    dark: icons.moon,
+    light: icons.sun,
+  };
+  const themeButtons = THEME_CHOICES.map((choice) =>
+    h(
+      "button",
+      {
+        type: "button",
+        class: "segment",
+        role: "radio",
+        "aria-checked": "false",
+        "data-theme": choice.id,
+        onclick: () => changeAppearance({ theme: choice.id }),
+      },
+      svg(themeIcons[choice.id]),
+      choice.label,
+    ),
+  );
+  const swatchButtons = ACCENT_PRESETS.map((preset) =>
+    h("button", {
+      type: "button",
+      class: "swatch",
+      role: "radio",
+      title: preset.label,
+      "aria-label": preset.label,
+      "aria-checked": "false",
+      "data-accent": preset.hex,
+      style: `background:${preset.hex}`,
+      onclick: () => changeAppearance({ accent: preset.hex }),
+    }),
+  );
+  const hexInput = h("input", {
+    type: "text",
+    class: "text-input hex-input",
+    "aria-label": "Color en hexadecimal",
+    placeholder: "#ff7a1a",
+    maxlength: "7",
+    spellcheck: "false",
+    autocomplete: "off",
+  });
+  hexInput.addEventListener("input", () => {
+    const hex = normalizeHex(hexInput.value);
+    hexInput.classList.toggle("is-invalid", hexInput.value.trim() !== "" && hex === null);
+    if (hex !== null && hex !== settings.appearance.accent) changeAppearance({ accent: hex });
+  });
+  // Leaving the box with half a color in it puts the real one back.
+  hexInput.addEventListener("blur", () => {
+    hexInput.classList.remove("is-invalid");
+    hexInput.value = settings.appearance.accent;
+  });
+  const appearancePanel = h(
+    "section",
+    { class: "panel", "aria-labelledby": "appearance-title" },
+    h(
+      "div",
+      { class: "panel-head" },
+      h(
+        "div",
+        { class: "panel-title" },
+        svg(icons.palette),
+        h("h2", { id: "appearance-title" }, "Apariencia"),
+      ),
+    ),
+    h(
+      "div",
+      { class: "panel-body" },
+      row(
+        "Tema",
+        "Claro, oscuro, o el mismo que use tu sistema.",
+        h("div", { class: "segmented", role: "radiogroup", "aria-label": "Tema" }, ...themeButtons),
+      ),
+      h(
+        "div",
+        { class: "row row-stack" },
+        h(
+          "div",
+          { class: "row-text" },
+          h("div", { class: "row-label" }, "Color principal"),
+          h("div", { class: "row-hint muted" }, "Se usa en los detalles: la sección activa, los interruptores, los bordes al enfocar."),
+        ),
+        h(
+          "div",
+          { class: "accent-picker" },
+          h("div", { class: "swatches", role: "radiogroup", "aria-label": "Color principal" }, ...swatchButtons),
+          hexInput,
+        ),
+      ),
+    ),
+  );
+
   // ---- library panel ----------------------------------------------------
 
   const detectSwitch = switchControl("Detectar el juego al guardar un clip", (checked) =>
@@ -512,7 +610,7 @@ export function createSettings(root: HTMLElement): SettingsView {
       { class: "view-header" },
       h("div", {}, h("h1", {}, "Configuración"), h("p", { class: "muted" }, "Cambios con efecto inmediato")),
     ),
-    h("div", { class: "view-body" }, h("div", { class: "settings" }, shortcutsPanel, panel, libraryPanel, performancePanel)),
+    h("div", { class: "view-body" }, h("div", { class: "settings" }, appearancePanel, shortcutsPanel, panel, libraryPanel, performancePanel)),
   );
 
   // ---- rendering from state --------------------------------------------
@@ -571,6 +669,13 @@ export function createSettings(root: HTMLElement): SettingsView {
     banner.replaceChildren(...parts);
   }
 
+  function renderAppearance(): void {
+    const { theme, accent } = settings.appearance;
+    for (const button of themeButtons) button.setAttribute("aria-checked", String(button.dataset.theme === theme));
+    for (const button of swatchButtons) button.setAttribute("aria-checked", String(button.dataset.accent === accent));
+    if (document.activeElement !== hexInput) hexInput.value = accent;
+  }
+
   function renderValues(): void {
     const mic = settings.microphone;
     enabledSwitch.input.checked = mic.enabled;
@@ -593,6 +698,7 @@ export function createSettings(root: HTMLElement): SettingsView {
     screenshotRecorder.render();
     clearScreenshot.hidden = settings.shortcuts.screenshot === "";
     resetSaveShortcut.hidden = settings.shortcuts.saveClip === DEFAULT_SAVE_SHORTCUT;
+    renderAppearance();
     detectSwitch.input.checked = settings.library.detectGame;
     lowRamSwitch.input.checked = settings.performance.lowRam;
     lowRamRow.hint.textContent = memoryModeText(plans, settings.performance.lowRam);
@@ -621,6 +727,10 @@ export function createSettings(root: HTMLElement): SettingsView {
 
   function changePerformance(patch: Partial<PerformanceSettings>): void {
     update(withPerformance(settings, patch), false);
+  }
+
+  function changeAppearance(patch: Partial<AppearanceSettings>): void {
+    update(withAppearance(settings, patch), false);
   }
 
   function changeLibrary(patch: Partial<LibrarySettings>): void {

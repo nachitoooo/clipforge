@@ -38,6 +38,7 @@ say how to get past that.
 - **Copy** a clip or a screenshot to paste it in Discord, Mail and so on.
 - **Low RAM mode** (Settings → Rendimiento): one minute of buffer at half the
   bitrate, about a quarter of the memory.
+- **Light or dark** interface (or the system's) and a main color of your choice.
 - Lives in the tray; nothing is ever uploaded anywhere.
 
 ## Status

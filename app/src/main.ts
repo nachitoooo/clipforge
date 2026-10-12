@@ -1,4 +1,5 @@
 import * as api from "./api";
+import { createAppearance } from "./ui/appearance";
 import { h, svg } from "./ui/dom";
 import { createGallery } from "./ui/gallery";
 import { icons } from "./ui/icons";
@@ -21,6 +22,12 @@ const topItems: NavItem[] = [
 const bottomItems: NavItem[] = [{ id: "settings", label: "Configuración", icon: icons.settings }];
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // Ask for the settings first: the theme and the color are drawn from them, so
+  // the sooner they arrive the shorter the window shows the default look.
+  const settingsReady = api.getSettings();
+  const appearance = createAppearance();
+  settingsReady.then((settings) => appearance.apply(settings.appearance)).catch(() => {});
+
   const sidebar = document.getElementById("sidebar")!;
   const content = document.getElementById("content")!;
 
@@ -89,17 +96,17 @@ window.addEventListener("DOMContentLoaded", async () => {
       void library.refresh();
     }),
     api.onBufferChanged((status) => gallery.setBufferStatus(status)),
-    api.onSettingsChanged(({ shortcuts }) =>
-      gallery.setSaveShortcut(shortcuts.saveClip, shortcuts.clipSeconds),
-    ),
+    api.onSettingsChanged(({ shortcuts, appearance: look }) => {
+      gallery.setSaveShortcut(shortcuts.saveClip, shortcuts.clipSeconds);
+      appearance.apply(look);
+    }),
   ]);
 
   api
     .bufferStatus()
     .then((status) => gallery.setBufferStatus(status))
     .catch((e) => toast(String(e), "error"));
-  api
-    .getSettings()
+  settingsReady
     .then(({ shortcuts }) => gallery.setSaveShortcut(shortcuts.saveClip, shortcuts.clipSeconds))
     .catch((e) => toast(String(e), "error"));
   void gallery.refresh();

@@ -19,6 +19,7 @@ surprises, and the settings planned next (in the order we would build them).
 | File each clip in a folder named after its game | `settings.library.autoFolders` (default off) | read when the clip is saved; needs `detectGame` |
 | Screenshot shortcut (optional) | `settings.shortcuts.screenshot` (empty = none, the default) | live: registered with the others, all or nothing; the tray entry shows it |
 | Low RAM mode (1 min of buffer at 6 Mb/s instead of 2 min at 12 Mb/s: ~45 MB instead of ~180 MB) | `settings.performance.lowRam` (default off) | **restarts the video capture** and empties the buffer: the UI asks first; both numbers live in `memory.rs` |
+| Theme (system / dark / light) and the main color (`#rrggbb`) | `settings.appearance.theme` (default `dark`), `settings.appearance.accent` (default `#ff7a1a`) | live: `update_settings` emits `settings-changed` and `ui/appearance.ts` writes `data-theme` and the accent properties on the root element; never restarts anything. Unknown values go back to the default in `Settings::validated` |
 | Detect the game when a clip is saved | `settings.library.detectGame` (default on) | live: an atomic shared with the activity tracker; off stops the lookup and forgets what it saw |
 
 ## How to add a setting

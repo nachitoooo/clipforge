@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClipInfo } from "../lib/clips";
 import { NONE, type ClipFilter } from "../lib/filter";
 import type { FolderInfo } from "../lib/folders";
+import { chooseOption, dropdownLabels, dropdownOf, dropdownValue } from "./dropdown.testing";
 import { createFilterBar, type FilterBar } from "./filterbar";
 
 const clip = (name: string, game: string | null, folders: string[] = []): ClipInfo => ({
@@ -47,16 +48,12 @@ function make(folderSelector = true) {
 beforeEach(() => make());
 
 const q = <T extends Element>(selector: string) => bar.el.querySelector(selector) as T;
-const select = (label: string) => q<HTMLSelectElement>(`select[aria-label="${label}"]`);
+const select = (label: string) => dropdownOf(bar.el, label)!;
 const search = () => q<HTMLInputElement>("input");
-const clearButton = () => q<HTMLButtonElement>("button");
+const clearButton = () => q<HTMLButtonElement>(".btn-small");
 const last = () => changes[changes.length - 1];
-const labels = (el: HTMLSelectElement) => [...el.options].map((o) => o.textContent);
-
-function choose(el: HTMLSelectElement, value: string) {
-  el.value = value;
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-}
+const labels = dropdownLabels;
+const choose = chooseOption;
 
 function type(text: string) {
   search().value = text;
@@ -99,7 +96,7 @@ describe("the options it offers", () => {
 
   it("leaves the folder selector out when asked (inside a folder)", () => {
     make(false);
-    expect(bar.el.querySelector('select[aria-label="Carpeta"]')).toBeNull();
+    expect(dropdownOf(bar.el, "Carpeta")).toBeNull();
   });
 });
 
@@ -208,9 +205,9 @@ describe("clearing", () => {
     clearButton().click();
     expect(last()).toEqual({ query: "", game: null, folder: null, range: "all", sort: "name", kind: "all" });
     expect(search().value).toBe("");
-    expect(select("Juego").value).toBe("");
-    expect(select("Fecha").value).toBe("all");
-    expect(select("Ordenar por").value).toBe("name");
+    expect(dropdownValue(select("Juego"))).toBe("");
+    expect(dropdownValue(select("Fecha"))).toBe("all");
+    expect(dropdownValue(select("Ordenar por"))).toBe("name");
     expect(clearButton().hidden).toBe(true);
   });
 
@@ -229,7 +226,7 @@ describe("new data", () => {
     choose(select("Juego"), "fortnite");
     bar.setData({ clips: [...clips, clip("e", "Fortnite")], folders });
     expect(bar.get().game).toBe("fortnite");
-    expect(select("Juego").value).toBe("fortnite");
+    expect(dropdownValue(select("Juego"))).toBe("fortnite");
     expect(labels(select("Juego"))).toContain("Fortnite (2)");
   });
 
@@ -237,7 +234,7 @@ describe("new data", () => {
     choose(select("Juego"), "fortnite");
     bar.setData({ clips: clips.filter((c) => c.game !== "Fortnite"), folders });
     expect(bar.get().game).toBeNull();
-    expect(select("Juego").value).toBe("");
+    expect(dropdownValue(select("Juego"))).toBe("");
   });
 
   it("drops a folder that was deleted but keeps 'no folder'", () => {
@@ -297,7 +294,7 @@ describe("clips and screenshots", () => {
     choose(kindSelect(), "clip");
     clearButton().click();
     expect(last().kind).toBe("all");
-    expect(kindSelect().value).toBe("all");
+    expect(dropdownValue(kindSelect())).toBe("all");
   });
 
   it("counts 'elementos' when the list mixes both", () => {

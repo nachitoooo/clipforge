@@ -51,12 +51,22 @@ export interface PerformanceSettings {
   lowRam: boolean;
 }
 
+/** `system` follows the operating system. */
+export type ThemeChoice = "system" | "dark" | "light";
+
+export interface AppearanceSettings {
+  theme: ThemeChoice;
+  /** The main color, `#rrggbb`. */
+  accent: string;
+}
+
 export interface Settings {
   version: number;
   shortcuts: ShortcutSettings;
   microphone: MicrophoneSettings;
   library: LibrarySettings;
   performance: PerformanceSettings;
+  appearance: AppearanceSettings;
 }
 
 /** What one memory mode costs; mirrors `memory::PlanInfo` in `src-tauri/src/memory.rs`. */
@@ -116,6 +126,7 @@ export function defaultSettings(): Settings {
     },
     library: { detectGame: true, autoFolders: false },
     performance: { lowRam: false },
+    appearance: { theme: "dark", accent: "#ff7a1a" },
   };
 }
 
@@ -237,6 +248,11 @@ export function withPerformance(
   patch: Partial<PerformanceSettings>,
 ): Settings {
   return { ...settings, performance: { ...settings.performance, ...patch } };
+}
+
+/** A copy of `settings` with the appearance section patched. */
+export function withAppearance(settings: Settings, patch: Partial<AppearanceSettings>): Settings {
+  return { ...settings, appearance: { ...settings.appearance, ...patch } };
 }
 
 /** `180 MB`, `45 MB` (decimal, rounded: it is an estimate). */

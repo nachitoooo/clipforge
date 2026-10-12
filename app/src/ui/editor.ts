@@ -487,7 +487,7 @@ function buildView(clip: ClipInfo, info: EditorClip, root: HTMLElement, close: (
   const hint = h(
     "p",
     { class: "editor-hint muted" },
-    "Arrastrá los extremos naranjas para recortar. Espacio reproduce · I y O marcan inicio y final · ← → avanzan de a un fotograma.",
+    "Arrastrá los extremos de la selección para recortar. Espacio reproduce · I y O marcan inicio y final · ← → avanzan de a un fotograma.",
     info.audio.length > 1
       ? " La vista previa solo reproduce la pista de Juego; el recorte guarda las pistas que dejes activadas."
       : null,

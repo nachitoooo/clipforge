@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClipInfo } from "../lib/clips";
 import type { FolderInfo } from "../lib/folders";
+import { chooseOption, dropdownLabels, dropdownOf } from "./dropdown.testing";
 
 const api = vi.hoisted(() => ({
   listClips: vi.fn(),
@@ -605,7 +606,7 @@ describe("searching and filtering the Biblioteca", () => {
   ];
   const bar = () => q(".filterbar", root());
   const search = () => q<HTMLInputElement>(".filterbar input", root())!;
-  const select = (label: string) => q<HTMLSelectElement>(`select[aria-label="${label}"]`, root());
+  const select = (label: string) => dropdownOf(root(), label);
   const titles = (section?: string) =>
     all(section ? `[data-section="${section}"] .card` : ".card", root()).map((c) => q(".card-title", c)!.textContent);
 
@@ -614,10 +615,7 @@ describe("searching and filtering the Biblioteca", () => {
     search().dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  function choose(el: HTMLSelectElement | null, value: string) {
-    el!.value = value;
-    el!.dispatchEvent(new Event("change", { bubbles: true }));
-  }
+  const choose = (el: HTMLElement | null, value: string) => chooseOption(el!, value);
 
   it("has a bar when there are clips, and none in an empty library", async () => {
     await open([], []);
@@ -711,7 +709,7 @@ describe("searching and filtering the Biblioteca", () => {
       await inside();
       expect(bar()).not.toBeNull();
       expect(select("Carpeta")).toBeNull();
-      expect([...select("Juego")!.options].map((o) => o.textContent)).toEqual(["Todos los juegos", "Valorant (2)"]);
+      expect(dropdownLabels(select("Juego")!)).toEqual(["Todos los juegos", "Valorant (2)"]);
     });
 
     it("filters only the clips of the folder", async () => {

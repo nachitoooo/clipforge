@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClipInfo } from "../lib/clips";
 import type { FolderInfo } from "../lib/folders";
+import { chooseOption, dropdownOf } from "./dropdown.testing";
 
 const api = vi.hoisted(() => ({
   listClips: vi.fn(),
@@ -240,16 +241,13 @@ describe("screenshots", () => {
 
   it("can be told apart with the type filter, which appears with the first one", async () => {
     await show(clip(1));
-    expect(root().querySelector('select[aria-label="Tipo"]')).toSatisfy(
-      (el: HTMLElement | null) => el === null || el.hidden,
-    );
+    expect(dropdownOf(root(), "Tipo")).toSatisfy((el: HTMLElement | null) => el === null || el.hidden);
     document.body.innerHTML = '<div id="toasts"></div><section id="root"></section>';
     const cards = await show(clip(1), shot(2), shot(3));
     expect(cards).toHaveLength(3);
-    const select = root().querySelector<HTMLSelectElement>('select[aria-label="Tipo"]')!;
+    const select = dropdownOf(root(), "Tipo")!;
     expect(select.hidden).toBe(false);
-    select.value = "screenshot";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    chooseOption(select, "screenshot");
     const names = [...root().querySelectorAll(".card-title")].map((t) => t.textContent);
     expect(names.sort()).toEqual(["captura-2", "captura-3"]);
     expect(root().querySelector(".filter-status")!.textContent).toBe("2 de 3 elementos");
@@ -387,17 +385,14 @@ describe("searching and filtering Recientes", () => {
   const bar = () => root().querySelector(".filterbar") as HTMLElement | null;
   const search = () => root().querySelector<HTMLInputElement>(".filterbar input")!;
   const titles = () => [...root().querySelectorAll(".card .card-title")].map((t) => t.textContent);
-  const select = (label: string) => root().querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+  const select = (label: string) => dropdownOf(root(), label)!;
 
   function type(text: string) {
     search().value = text;
     search().dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  function choose(el: HTMLSelectElement, value: string) {
-    el.value = value;
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  }
+  const choose = chooseOption;
 
   async function open(clips: ClipInfo[] = library) {
     api.listClips.mockResolvedValue(clips);
