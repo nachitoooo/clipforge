@@ -19,6 +19,15 @@ jobs:
         run: |
           choco install vb-cable -y --no-progress 2>&1 | Select-Object -Last 25
           exit 0
+      - name: Run the driver setup
+        shell: powershell
+        run: |
+          Get-ChildItem C:\ProgramData\chocolatey\lib\vb-cable\tools | Format-Table Name, Length
+          $setup = "C:\ProgramData\chocolatey\lib\vb-cable\tools\VBCABLE_Setup_x64.exe"
+          $p = Start-Process -FilePath $setup -ArgumentList "-i","-h" -Wait -PassThru
+          "setup exit code: $($p.ExitCode)"
+          Get-Content C:\Windows\INF\setupapi.dev.log -Tail 40 -ErrorAction SilentlyContinue
+          exit 0
       - name: Audio endpoints after
         shell: powershell
         run: |
