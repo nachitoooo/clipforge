@@ -22,6 +22,13 @@ pub const GAIN_MIN_PERCENT: u32 = 0;
 pub const GAIN_MAX_PERCENT: u32 = 200;
 pub const DEFAULT_MUTE_SHORTCUT: &str = "CommandOrControl+Shift+M";
 pub const DEFAULT_SAVE_SHORTCUT: &str = "CommandOrControl+Shift+S";
+/// How much a save shortcut keeps by default, and the bounds of any length: a
+/// clip can't be longer than the replay buffer (`BufferConfig::default`).
+pub const DEFAULT_CLIP_SECONDS: u64 = 30;
+pub const MIN_CLIP_SECONDS: u64 = 5;
+pub const MAX_CLIP_SECONDS: u64 = 120;
+/// Save shortcuts besides the main one.
+pub const MAX_EXTRA_SAVE_SHORTCUTS: usize = 4;
 
 /// How the microphone ends up in a saved clip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -64,20 +71,56 @@ impl Default for MicrophoneSettings {
     }
 }
 
+/// A save shortcut with a length of its own, e.g. F9 for the last 15 seconds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ClipShortcut {
+    pub accelerator: String,
+    pub seconds: u64,
+}
+
+impl Default for ClipShortcut {
+    fn default() -> Self {
+        Self {
+            accelerator: String::new(),
+            seconds: DEFAULT_CLIP_SECONDS,
+        }
+    }
+}
+
 /// Global shortcuts that aren't tied to one feature's section (the
 /// microphone's mute shortcut lives with the microphone).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ShortcutSettings {
-    /// Saves the last seconds as a clip, from any app or game.
+    /// Saves the last `clip_seconds` as a clip, from any app or game. The tray
+    /// entry and the window's button save the same length.
     pub save_clip: String,
+    pub clip_seconds: u64,
+    /// More save shortcuts, each with its own length.
+    pub extra_save_clip: Vec<ClipShortcut>,
 }
 
 impl Default for ShortcutSettings {
     fn default() -> Self {
         Self {
             save_clip: DEFAULT_SAVE_SHORTCUT.to_string(),
+            clip_seconds: DEFAULT_CLIP_SECONDS,
+            extra_save_clip: Vec::new(),
         }
+    }
+}
+
+fn clamp_seconds(seconds: u64) -> u64 {
+    seconds.clamp(MIN_CLIP_SECONDS, MAX_CLIP_SECONDS)
+}
+
+/// A length as people say it: `30 s`, `1 min`, `1 min 30 s`.
+pub fn clip_length_label(seconds: u64) -> String {
+    match (seconds / 60, seconds % 60) {
+        (0, s) => format!("{s} s"),
+        (m, 0) => format!("{m} min"),
+        (m, s) => format!("{m} min {s} s"),
     }
 }
 
@@ -194,6 +237,26 @@ impl Settings {
         self.shortcuts.save_clip = save_text;
         self.microphone.mute_shortcut = mute_text;
 
+        self.shortcuts.clip_seconds = clamp_seconds(self.shortcuts.clip_seconds);
+        if self.shortcuts.extra_save_clip.len() > MAX_EXTRA_SAVE_SHORTCUTS {
+            return Err(format!(
+                "demasiados atajos para guardar clips: además del principal caben {MAX_EXTRA_SAVE_SHORTCUTS}"
+            ));
+        }
+        let mut taken = vec![save, mute];
+        for extra in &mut self.shortcuts.extra_save_clip {
+            let text = extra.accelerator.trim().to_string();
+            let shortcut = parse_shortcut(&text)?;
+            if taken.contains(&shortcut) {
+                return Err(format!(
+                    "el atajo «{text}» ya está en uso: cada atajo tiene que ser distinto"
+                ));
+            }
+            taken.push(shortcut);
+            extra.accelerator = text;
+            extra.seconds = clamp_seconds(extra.seconds);
+        }
+
         let mic = &mut self.microphone;
 
         mic.gain_percent = mic.gain_percent.clamp(GAIN_MIN_PERCENT, GAIN_MAX_PERCENT);
@@ -227,6 +290,26 @@ impl Settings {
                 self.shortcuts.save_clip = DEFAULT_SAVE_SHORTCUT.to_string();
             }
         }
+
+        // The extra save shortcuts: keep the usable ones that are not repeated.
+        self.shortcuts.clip_seconds = clamp_seconds(self.shortcuts.clip_seconds);
+        let mut taken: Vec<Shortcut> = [&self.shortcuts.save_clip, &self.microphone.mute_shortcut]
+            .into_iter()
+            .filter_map(|text| parse_shortcut(text).ok())
+            .collect();
+        self.shortcuts.extra_save_clip.retain_mut(|extra| {
+            match parse_shortcut(&extra.accelerator) {
+                Ok(shortcut) if !taken.contains(&shortcut) => {
+                    taken.push(shortcut);
+                    extra.seconds = clamp_seconds(extra.seconds);
+                    true
+                }
+                _ => false,
+            }
+        });
+        self.shortcuts
+            .extra_save_clip
+            .truncate(MAX_EXTRA_SAVE_SHORTCUTS);
         self
     }
 }
@@ -701,5 +784,190 @@ mod tests {
                 "{accelerator} should be accepted as the save shortcut"
             );
         }
+    }
+
+    // ---- save shortcuts with their own length ----
+
+    fn extra(accelerator: &str, seconds: u64) -> ClipShortcut {
+        ClipShortcut {
+            accelerator: accelerator.into(),
+            seconds,
+        }
+    }
+
+    #[test]
+    fn a_clip_is_30_seconds_by_default_and_no_longer_than_the_buffer() {
+        let s = Settings::default();
+        assert_eq!(s.shortcuts.clip_seconds, 30);
+        assert!(s.shortcuts.extra_save_clip.is_empty());
+        assert_eq!(
+            MAX_CLIP_SECONDS,
+            clipforge_core::buffer::BufferConfig::default()
+                .max_duration
+                .as_secs(),
+            "a longer clip could never be filled"
+        );
+    }
+
+    #[test]
+    fn lengths_are_clamped_to_what_the_buffer_can_hold() {
+        let mut s = Settings::default();
+        s.shortcuts.clip_seconds = 0;
+        s.shortcuts.extra_save_clip = vec![extra("F9", 9_999), extra("F10", 1)];
+        let v = s.validated().unwrap();
+        assert_eq!(v.shortcuts.clip_seconds, MIN_CLIP_SECONDS);
+        assert_eq!(v.shortcuts.extra_save_clip[0].seconds, MAX_CLIP_SECONDS);
+        assert_eq!(v.shortcuts.extra_save_clip[1].seconds, MIN_CLIP_SECONDS);
+
+        let mut s = Settings::default();
+        s.shortcuts.clip_seconds = 45;
+        s.shortcuts.extra_save_clip = vec![extra("  F9 ", 15)];
+        let v = s.validated().unwrap();
+        assert_eq!(v.shortcuts.clip_seconds, 45);
+        assert_eq!(
+            v.shortcuts.extra_save_clip,
+            vec![extra("F9", 15)],
+            "trimmed"
+        );
+    }
+
+    #[test]
+    fn every_save_shortcut_must_be_different() {
+        for (taken, label) in [
+            ("CmdOrCtrl+Shift+S", "the main save shortcut"),
+            ("CommandOrControl+Shift+M", "the mute shortcut"),
+            (
+                "shift+commandorcontrol+m",
+                "the mute shortcut spelled differently",
+            ),
+        ] {
+            let mut s = Settings::default();
+            s.shortcuts.extra_save_clip = vec![extra(taken, 15)];
+            let err = s.validated().unwrap_err();
+            assert!(err.contains("ya está en uso"), "{label}: {err}");
+        }
+
+        let mut s = Settings::default();
+        s.shortcuts.extra_save_clip = vec![extra("F9", 15), extra("f9", 60)];
+        assert!(s.validated().unwrap_err().contains("ya está en uso"));
+    }
+
+    #[test]
+    fn an_extra_shortcut_follows_the_same_rules_as_any_other() {
+        for bad in ["", "Banana", "S", "Space"] {
+            let mut s = Settings::default();
+            s.shortcuts.extra_save_clip = vec![extra(bad, 15)];
+            assert!(s.validated().is_err(), "{bad:?} should be refused");
+        }
+    }
+
+    #[test]
+    fn there_is_a_limit_to_the_extra_shortcuts() {
+        let keys = ["F5", "F6", "F7", "F8", "F9"];
+        let mut s = Settings::default();
+        s.shortcuts.extra_save_clip = keys[..MAX_EXTRA_SAVE_SHORTCUTS]
+            .iter()
+            .map(|k| extra(k, 15))
+            .collect();
+        assert!(s.clone().validated().is_ok());
+
+        s.shortcuts
+            .extra_save_clip
+            .push(extra(keys[MAX_EXTRA_SAVE_SHORTCUTS], 15));
+        assert!(s.validated().unwrap_err().contains("demasiados"));
+    }
+
+    #[test]
+    fn extra_shortcuts_survive_a_restart() {
+        let dir = TempDir::new("extra-shortcuts");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.shortcuts.clip_seconds = 60;
+        s.shortcuts.extra_save_clip = vec![extra("F9", 15), extra("Alt+F9", 120)];
+        store.replace(s.clone().validated().unwrap()).unwrap();
+        assert_eq!(SettingsStore::load(dir.file()).get(), s);
+    }
+
+    #[test]
+    fn a_file_from_before_clip_lengths_keeps_its_shortcut_and_gets_30_seconds() {
+        let dir = TempDir::new("before-lengths");
+        fs::write(dir.file(), r#"{"shortcuts":{"saveClip":"F9"}}"#).unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.save_clip, "F9");
+        assert_eq!(s.shortcuts.clip_seconds, 30);
+        assert!(s.shortcuts.extra_save_clip.is_empty());
+    }
+
+    #[test]
+    fn a_hand_edited_file_keeps_only_the_usable_extra_shortcuts() {
+        let dir = TempDir::new("extra-repair");
+        fs::write(
+            dir.file(),
+            r#"{"shortcuts":{"saveClip":"F9","clipSeconds":99999,"extraSaveClip":[
+                {"accelerator":"F10","seconds":15},
+                {"accelerator":"nonsense","seconds":15},
+                {"accelerator":"f9","seconds":15},
+                {"accelerator":"CommandOrControl+Shift+M","seconds":15},
+                {"accelerator":"S","seconds":15},
+                {"accelerator":"F10","seconds":60},
+                {"accelerator":"F11","seconds":0},
+                {"accelerator":"F12"},
+                {"accelerator":"F13","seconds":30},
+                {"accelerator":"F14","seconds":30}
+            ]}}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.clip_seconds, MAX_CLIP_SECONDS);
+        assert_eq!(
+            s.shortcuts.extra_save_clip,
+            vec![
+                extra("F10", 15),
+                extra("F11", MIN_CLIP_SECONDS),
+                extra("F12", DEFAULT_CLIP_SECONDS),
+                extra("F13", 30),
+            ],
+            "unusable and repeated ones are dropped, the rest capped at four"
+        );
+        assert!(s.validated().is_ok(), "what it repaired passes validation");
+    }
+
+    #[test]
+    fn repairing_the_main_shortcut_does_not_leave_an_extra_on_the_same_keys() {
+        let dir = TempDir::new("extra-vs-default");
+        // "nonsense" falls back to the default; an extra already on those keys goes.
+        fs::write(
+            dir.file(),
+            r#"{"shortcuts":{"saveClip":"nonsense","extraSaveClip":[{"accelerator":"CommandOrControl+Shift+S","seconds":15}]}}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.save_clip, DEFAULT_SAVE_SHORTCUT);
+        assert!(s.shortcuts.extra_save_clip.is_empty());
+        assert!(s.validated().is_ok());
+    }
+
+    #[test]
+    fn lengths_read_the_way_people_say_them() {
+        for (seconds, label) in [
+            (5, "5 s"),
+            (30, "30 s"),
+            (59, "59 s"),
+            (60, "1 min"),
+            (90, "1 min 30 s"),
+            (120, "2 min"),
+        ] {
+            assert_eq!(clip_length_label(seconds), label);
+        }
+    }
+
+    #[test]
+    fn the_ui_sees_the_lengths_in_camel_case() {
+        let mut s = Settings::default();
+        s.shortcuts.extra_save_clip = vec![extra("F9", 15)];
+        let json = serde_json::to_value(s).unwrap();
+        assert_eq!(json["shortcuts"]["clipSeconds"], 30);
+        assert_eq!(json["shortcuts"]["extraSaveClip"][0]["accelerator"], "F9");
+        assert_eq!(json["shortcuts"]["extraSaveClip"][0]["seconds"], 15);
     }
 }

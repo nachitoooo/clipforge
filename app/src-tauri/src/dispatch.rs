@@ -5,7 +5,9 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     ToggleBuffer,
-    SaveClip,
+    /// Save the last this-many seconds; `None` = the length set in Settings
+    /// (the tray entry and the window's button).
+    SaveClip(Option<u64>),
     OpenClipsFolder,
     /// Silence or restore the microphone (hotkey or tray).
     ToggleMicMute,
@@ -26,7 +28,7 @@ impl Command {
     pub fn from_menu_id(id: &str) -> Option<Self> {
         match id {
             "toggle_buffer" => Some(Self::ToggleBuffer),
-            "save_clip" => Some(Self::SaveClip),
+            "save_clip" => Some(Self::SaveClip(None)),
             "open_folder" => Some(Self::OpenClipsFolder),
             "toggle_mic_mute" => Some(Self::ToggleMicMute),
             "quit" => Some(Self::Quit),
@@ -41,8 +43,9 @@ pub trait Actions {
     fn buffer_running(&self) -> bool;
     fn start_buffer(&self) -> Result<(), String>;
     fn stop_buffer(&self);
-    /// Returns a human-readable description of the saved clip.
-    fn save_clip(&self) -> Result<String, String>;
+    /// Saves the last `seconds` (the length from Settings when `None`) and
+    /// returns a human-readable description of the saved clip.
+    fn save_clip(&self, seconds: Option<u64>) -> Result<String, String>;
     fn open_clips_folder(&self);
     fn toggle_mic_mute(&self) -> Result<MuteOutcome, String>;
     fn quit(&self);
@@ -64,7 +67,7 @@ pub fn dispatch(command: Command, actions: &impl Actions) {
                 }
             }
         }
-        Command::SaveClip => match actions.save_clip() {
+        Command::SaveClip(seconds) => match actions.save_clip(seconds) {
             Ok(description) => actions.notify("Clip guardado", &description),
             Err(e) => actions.notify("No se pudo guardar el clip", &e),
         },
@@ -109,8 +112,11 @@ mod tests {
             self.calls.borrow_mut().push("stop".into());
             self.running.set(false);
         }
-        fn save_clip(&self) -> Result<String, String> {
-            self.calls.borrow_mut().push("save".into());
+        fn save_clip(&self, seconds: Option<u64>) -> Result<String, String> {
+            self.calls.borrow_mut().push(match seconds {
+                Some(s) => format!("save {s}"),
+                None => "save".into(),
+            });
             self.save_result.clone().unwrap_or(Ok("clip 30 s".into()))
         }
         fn open_clips_folder(&self) {
@@ -136,7 +142,11 @@ mod tests {
             Command::from_menu_id("toggle_buffer"),
             Some(Command::ToggleBuffer)
         );
-        assert_eq!(Command::from_menu_id("save_clip"), Some(Command::SaveClip));
+        assert_eq!(
+            Command::from_menu_id("save_clip"),
+            Some(Command::SaveClip(None)),
+            "the tray saves the length set in Settings"
+        );
         assert_eq!(
             Command::from_menu_id("open_folder"),
             Some(Command::OpenClipsFolder)
@@ -152,11 +162,20 @@ mod tests {
     #[test]
     fn hotkey_save_clip_notifies_success() {
         let mock = Mock::default();
-        dispatch(Command::SaveClip, &mock);
+        dispatch(Command::SaveClip(None), &mock);
         assert_eq!(mock.calls.borrow().as_slice(), ["save"]);
         let notes = mock.notifications.borrow();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].0, "Clip guardado");
+    }
+
+    #[test]
+    fn a_shortcut_with_its_own_length_asks_for_that_length() {
+        let mock = Mock::default();
+        dispatch(Command::SaveClip(Some(15)), &mock);
+        dispatch(Command::SaveClip(Some(120)), &mock);
+        assert_eq!(mock.calls.borrow().as_slice(), ["save 15", "save 120"]);
+        assert_eq!(mock.notifications.borrow().len(), 2);
     }
 
     #[test]
@@ -165,7 +184,7 @@ mod tests {
             save_result: Some(Err("buffer vacío".into())),
             ..Default::default()
         };
-        dispatch(Command::SaveClip, &mock);
+        dispatch(Command::SaveClip(None), &mock);
         let notes = mock.notifications.borrow();
         assert_eq!(notes[0].0, "No se pudo guardar el clip");
         assert!(notes[0].1.contains("buffer vacío"));

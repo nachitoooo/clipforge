@@ -9,32 +9,46 @@ use std::str::FromStr;
 
 use tauri_plugin_global_shortcut::Shortcut;
 
-use crate::settings::Settings;
+use crate::settings::{clip_length_label, Settings};
 
 /// What a global shortcut does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutAction {
-    SaveClip,
+    /// Save the last this-many seconds.
+    SaveClip(u64),
     ToggleMicMute,
 }
 
 /// What the user calls each shortcut, for messages.
-fn name_of(action: ShortcutAction) -> &'static str {
+fn name_of(action: ShortcutAction) -> String {
     match action {
-        ShortcutAction::SaveClip => "guardar clip",
-        ShortcutAction::ToggleMicMute => "silenciar el micrófono",
+        ShortcutAction::SaveClip(seconds) => {
+            format!("guardar clip de {}", clip_length_label(seconds))
+        }
+        ShortcutAction::ToggleMicMute => "silenciar el micrófono".to_string(),
     }
 }
 
 /// The accelerators `settings` wants registered, in registration order.
-fn wanted(settings: &Settings) -> [(ShortcutAction, &str); 2] {
-    [
-        (ShortcutAction::SaveClip, &settings.shortcuts.save_clip),
+fn wanted(settings: &Settings) -> Vec<(ShortcutAction, &str)> {
+    let shortcuts = &settings.shortcuts;
+    let mut list = vec![
+        (
+            ShortcutAction::SaveClip(shortcuts.clip_seconds),
+            shortcuts.save_clip.as_str(),
+        ),
         (
             ShortcutAction::ToggleMicMute,
-            &settings.microphone.mute_shortcut,
+            settings.microphone.mute_shortcut.as_str(),
         ),
-    ]
+    ];
+    list.extend(shortcuts.extra_save_clip.iter().map(|extra| {
+        (
+            ShortcutAction::SaveClip(extra.seconds),
+            extra.accelerator.as_str(),
+        )
+    }));
+    list
 }
 
 /// The action a pressed shortcut triggers under `settings`, if any.
@@ -80,47 +94,50 @@ pub fn register_all(registry: &impl Registry, settings: &Settings) -> Vec<String
 /// Move the registrations from what `old` had to what `new` wants. Either all
 /// the changes happen or none do: if the OS refuses one, whatever was already
 /// moved is put back and the error says which shortcut was the problem.
+///
+/// Registrations are compared as a set of key combinations, not by position:
+/// the list of save shortcuts grows and shrinks, and a length that changes under
+/// the same keys needs no OS call at all (the action is looked up when the key
+/// is pressed).
 pub fn switch(registry: &impl Registry, old: &Settings, new: &Settings) -> Result<(), String> {
-    struct Change {
-        action: ShortcutAction,
-        text: String,
-        old: Option<Shortcut>,
-        new: Shortcut,
+    let mut wanted_now = Vec::new();
+    for (action, text) in wanted(new) {
+        let shortcut =
+            Shortcut::from_str(text).map_err(|_| format!("atajo no válido: «{text}»"))?;
+        wanted_now.push((action, text, shortcut));
     }
-    let mut changes = Vec::new();
-    for ((action, old_text), (_, new_text)) in wanted(old).into_iter().zip(wanted(new)) {
-        let new_shortcut =
-            Shortcut::from_str(new_text).map_err(|_| format!("atajo no válido: «{new_text}»"))?;
-        let old_shortcut = Shortcut::from_str(old_text).ok();
-        if old_shortcut != Some(new_shortcut) {
-            changes.push(Change {
-                action,
-                text: new_text.to_string(),
-                old: old_shortcut,
-                new: new_shortcut,
-            });
-        }
-    }
+    let before: Vec<Shortcut> = wanted(old)
+        .into_iter()
+        .filter_map(|(_, text)| Shortcut::from_str(text).ok())
+        .collect();
+
+    let to_add: Vec<_> = wanted_now
+        .iter()
+        .filter(|(_, _, shortcut)| !before.contains(shortcut))
+        .collect();
+    let to_remove: Vec<Shortcut> = before
+        .iter()
+        .copied()
+        .filter(|shortcut| !wanted_now.iter().any(|(_, _, now)| now == shortcut))
+        .collect();
 
     // Free the old combinations first, so one shortcut can move onto the keys
     // another one is leaving (swapping the two, for instance).
-    for change in &changes {
-        if let Some(old) = change.old {
-            registry.unregister(old);
-        }
+    for shortcut in &to_remove {
+        registry.unregister(*shortcut);
     }
     let mut registered = Vec::new();
-    for change in &changes {
-        match registry.register(change.new) {
-            Ok(()) => registered.push(change.new),
+    for (action, text, shortcut) in to_add {
+        match registry.register(*shortcut) {
+            Ok(()) => registered.push(*shortcut),
             Err(e) => {
                 for shortcut in registered {
                     registry.unregister(shortcut);
                 }
-                for old in changes.iter().filter_map(|c| c.old) {
+                for old in to_remove {
                     registry.register(old).ok();
                 }
-                return Err(unavailable(change.action, &change.text, &e));
+                return Err(unavailable(*action, text, &e));
             }
         }
     }
@@ -130,6 +147,7 @@ pub fn switch(registry: &impl Registry, old: &Settings, new: &Settings) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::ClipShortcut;
     use std::cell::RefCell;
     use std::collections::HashSet;
 
@@ -185,6 +203,19 @@ mod tests {
         s
     }
 
+    /// `settings(SAVE, MUTE)` plus these extra save shortcuts.
+    fn with_extras(extras: &[(&str, u64)]) -> Settings {
+        let mut s = settings(SAVE, MUTE);
+        s.shortcuts.extra_save_clip = extras
+            .iter()
+            .map(|(accelerator, seconds)| ClipShortcut {
+                accelerator: (*accelerator).into(),
+                seconds: *seconds,
+            })
+            .collect();
+        s
+    }
+
     const SAVE: &str = "CommandOrControl+Shift+S";
     const MUTE: &str = "CommandOrControl+Shift+M";
 
@@ -193,7 +224,7 @@ mod tests {
         let s = settings("Alt+F9", MUTE);
         assert_eq!(
             action_for(&s, &key("Alt+F9")),
-            Some(ShortcutAction::SaveClip)
+            Some(ShortcutAction::SaveClip(30))
         );
         assert_eq!(
             action_for(&s, &key(MUTE)),
@@ -206,10 +237,13 @@ mod tests {
     #[test]
     fn spelling_does_not_matter() {
         let s = settings("CmdOrCtrl+Shift+S", MUTE);
-        assert_eq!(action_for(&s, &key(SAVE)), Some(ShortcutAction::SaveClip));
+        assert_eq!(
+            action_for(&s, &key(SAVE)),
+            Some(ShortcutAction::SaveClip(30))
+        );
         assert_eq!(
             action_for(&s, &key("Shift+CommandOrControl+S")),
-            Some(ShortcutAction::SaveClip)
+            Some(ShortcutAction::SaveClip(30))
         );
     }
 
@@ -338,5 +372,134 @@ mod tests {
         let registry = Fake::with(&[MUTE], &[]);
         switch(&registry, &settings(SAVE, MUTE), &settings("Alt+F9", MUTE)).unwrap();
         assert!(registry.has("Alt+F9") && registry.has(MUTE));
+    }
+
+    // ---- save shortcuts with their own length ----
+
+    #[test]
+    fn each_save_shortcut_saves_its_own_length() {
+        let mut s = with_extras(&[("F9", 15), ("Alt+F9", 120)]);
+        s.shortcuts.clip_seconds = 45;
+        assert_eq!(
+            action_for(&s, &key(SAVE)),
+            Some(ShortcutAction::SaveClip(45))
+        );
+        assert_eq!(
+            action_for(&s, &key("F9")),
+            Some(ShortcutAction::SaveClip(15))
+        );
+        assert_eq!(
+            action_for(&s, &key("Alt+F9")),
+            Some(ShortcutAction::SaveClip(120))
+        );
+        assert_eq!(
+            action_for(&s, &key(MUTE)),
+            Some(ShortcutAction::ToggleMicMute)
+        );
+        assert_eq!(action_for(&s, &key("F10")), None);
+    }
+
+    #[test]
+    fn startup_registers_the_extra_shortcuts_too() {
+        let registry = Fake::default();
+        let problems = register_all(&registry, &with_extras(&[("F9", 15), ("F10", 60)]));
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(registry.count(), 4);
+        assert!(registry.has("F9") && registry.has("F10"));
+    }
+
+    #[test]
+    fn a_taken_extra_shortcut_is_reported_by_its_length() {
+        let registry = Fake::with(&[], &["F9"]);
+        let problems = register_all(&registry, &with_extras(&[("F9", 90), ("F10", 15)]));
+        assert_eq!(problems.len(), 1);
+        assert!(
+            problems[0].contains("guardar clip de 1 min 30 s") && problems[0].contains("F9"),
+            "{}",
+            problems[0]
+        );
+        assert!(registry.has("F10"), "the others still work");
+    }
+
+    #[test]
+    fn adding_and_removing_extra_shortcuts_moves_only_those() {
+        let registry = Fake::with(&[SAVE, MUTE], &[]);
+        let none = with_extras(&[]);
+        let two = with_extras(&[("F9", 15), ("F10", 60)]);
+
+        switch(&registry, &none, &two).unwrap();
+        assert_eq!(registry.count(), 4);
+        assert!(registry.has("F9") && registry.has("F10"));
+
+        switch(&registry, &two, &with_extras(&[("F10", 60)])).unwrap();
+        assert!(!registry.has("F9") && registry.has("F10"));
+        assert!(registry.has(SAVE) && registry.has(MUTE));
+        assert_eq!(registry.count(), 3);
+
+        switch(&registry, &with_extras(&[("F10", 60)]), &none).unwrap();
+        assert_eq!(registry.count(), 2);
+    }
+
+    #[test]
+    fn changing_only_a_length_does_not_touch_the_os() {
+        // The fake refuses a second registration of the same keys: any attempt to
+        // re-register F9 would fail the switch.
+        let registry = Fake::with(&[SAVE, MUTE, "F9"], &[]);
+        switch(
+            &registry,
+            &with_extras(&[("F9", 15)]),
+            &with_extras(&[("F9", 120)]),
+        )
+        .unwrap();
+        assert!(registry.has("F9"));
+        assert_eq!(registry.count(), 3);
+
+        // The main length too.
+        let mut longer = with_extras(&[]);
+        longer.shortcuts.clip_seconds = 90;
+        switch(&registry, &with_extras(&[("F9", 120)]), &longer).unwrap();
+        assert!(registry.has(SAVE));
+        assert!(!registry.has("F9"), "only the extra that went away");
+    }
+
+    #[test]
+    fn an_extra_shortcut_can_move_onto_the_keys_the_main_one_leaves() {
+        let registry = Fake::with(&[SAVE, MUTE], &[]);
+        let before = with_extras(&[]);
+        let mut after = with_extras(&[(SAVE, 15)]);
+        after.shortcuts.save_clip = "Alt+F9".into();
+        switch(&registry, &before, &after).unwrap();
+        assert!(registry.has(SAVE) && registry.has("Alt+F9") && registry.has(MUTE));
+        assert_eq!(registry.count(), 3);
+    }
+
+    #[test]
+    fn a_refused_extra_shortcut_puts_everything_back() {
+        // Three change at once; the last one is taken by another application.
+        let registry = Fake::with(&[SAVE, MUTE, "F9"], &["F11"]);
+        let err = switch(
+            &registry,
+            &with_extras(&[("F9", 15)]),
+            &with_extras(&[("F10", 15), ("F11", 60)]),
+        )
+        .unwrap_err();
+        assert!(err.contains("F11") && err.contains("1 min"), "{err}");
+        assert!(registry.has("F9"), "the one that was removed is back");
+        assert!(!registry.has("F10"), "the one that was added is gone");
+        assert!(registry.has(SAVE) && registry.has(MUTE));
+        assert_eq!(registry.count(), 3);
+    }
+
+    #[test]
+    fn an_unparseable_extra_is_refused_before_touching_anything() {
+        let registry = Fake::with(&[SAVE, MUTE, "F9"], &[]);
+        let err = switch(
+            &registry,
+            &with_extras(&[("F9", 15)]),
+            &with_extras(&[("nonsense", 15)]),
+        )
+        .unwrap_err();
+        assert!(err.contains("no válido"));
+        assert!(registry.has("F9") && registry.count() == 3);
     }
 }

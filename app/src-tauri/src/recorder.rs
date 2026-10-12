@@ -26,9 +26,6 @@ use crate::mic::{
 };
 use crate::settings::{MicMode, MicrophoneSettings, SettingsStore};
 
-/// Default clip length saved by the hotkey (configurable UI comes in M3).
-pub const DEFAULT_CLIP_SECONDS: u64 = 30;
-
 /// What the UI shows about the replay buffer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BufferStatus {

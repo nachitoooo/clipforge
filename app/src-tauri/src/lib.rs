@@ -56,7 +56,7 @@ use clipmeta::ClipMetaStore;
 use dispatch::{dispatch, Actions, Command, MuteOutcome};
 use folders::{FolderDraft, FolderInfo, FolderStore};
 use mic::{MicDevice, MicStatus};
-use recorder::{BufferStatus, Recorder, DEFAULT_CLIP_SECONDS};
+use recorder::{BufferStatus, Recorder};
 use settings::{Settings, SettingsStore};
 use shortcuts::{Registry, ShortcutAction};
 use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
@@ -87,14 +87,22 @@ struct TrayItems {
     save: MenuItem<Wry>,
 }
 
-/// Show the current save shortcut next to the tray's "save clip" entry.
-fn show_save_shortcut_in_tray(app: &AppHandle, accelerator: &str) {
-    if let Err(e) = app
-        .state::<TrayItems>()
-        .save
-        .set_accelerator(Some(accelerator))
-    {
-        eprintln!("clipforge: tray shortcut hint «{accelerator}»: {e}");
+/// Show the length and the shortcut of the main save in the tray's "save clip"
+/// entry (the extra shortcuts have no entry of their own).
+fn show_save_in_tray(app: &AppHandle, shortcuts: &settings::ShortcutSettings) {
+    let tray = app.state::<TrayItems>();
+    let label = format!(
+        "Guardar clip (últimos {})",
+        settings::clip_length_label(shortcuts.clip_seconds)
+    );
+    if let Err(e) = tray.save.set_text(label) {
+        eprintln!("clipforge: tray label: {e}");
+    }
+    if let Err(e) = tray.save.set_accelerator(Some(&shortcuts.save_clip)) {
+        eprintln!(
+            "clipforge: tray shortcut hint «{}»: {e}",
+            shortcuts.save_clip
+        );
     }
 }
 
@@ -156,8 +164,9 @@ impl Actions for AppActions {
             .ok();
     }
 
-    fn save_clip(&self) -> Result<String, String> {
-        let saved = self.recorder().save_clip(DEFAULT_CLIP_SECONDS)?;
+    fn save_clip(&self, seconds: Option<u64>) -> Result<String, String> {
+        let seconds = seconds.unwrap_or_else(|| self.settings().get().shortcuts.clip_seconds);
+        let saved = self.recorder().save_clip(seconds)?;
         let name = saved
             .path
             .file_name()
@@ -165,7 +174,7 @@ impl Actions for AppActions {
             .unwrap_or_default();
         // The game is whatever held the screen for most of the clip. Saving
         // from the tray or the window works too: ClipForge itself is ignored.
-        let game = self.recorder().detected_game(DEFAULT_CLIP_SECONDS);
+        let game = self.recorder().detected_game(seconds);
         keep_index(
             self.app
                 .state::<ClipMetaStore>()
@@ -243,7 +252,7 @@ fn toggle_buffer(app: AppHandle) {
 
 #[tauri::command]
 fn save_clip(app: AppHandle) {
-    run_command(&app, Command::SaveClip);
+    run_command(&app, Command::SaveClip(None));
 }
 
 #[tauri::command]
@@ -548,8 +557,10 @@ fn update_settings(
             return Err(e);
         }
     };
-    if saved.shortcuts.save_clip != previous.shortcuts.save_clip {
-        show_save_shortcut_in_tray(&app, &saved.shortcuts.save_clip);
+    if saved.shortcuts.save_clip != previous.shortcuts.save_clip
+        || saved.shortcuts.clip_seconds != previous.shortcuts.clip_seconds
+    {
+        show_save_in_tray(&app, &saved.shortcuts);
     }
     app.emit("settings-changed", &saved).ok();
     app.state::<Recorder>().apply_live_controls();
@@ -596,8 +607,8 @@ pub fn run() {
                     }
                     let settings = app.state::<Arc<SettingsStore>>().get();
                     match shortcuts::action_for(&settings, shortcut) {
-                        Some(ShortcutAction::SaveClip) => {
-                            run_command(app.app_handle(), Command::SaveClip)
+                        Some(ShortcutAction::SaveClip(seconds)) => {
+                            run_command(app.app_handle(), Command::SaveClip(Some(seconds)))
                         }
                         Some(ShortcutAction::ToggleMicMute) => {
                             run_command(app.app_handle(), Command::ToggleMicMute)
@@ -657,8 +668,7 @@ pub fn run() {
             // Tray menu (menu-bar icon on macOS).
             let toggle =
                 MenuItemBuilder::with_id("toggle_buffer", "Iniciar/Detener buffer").build(app)?;
-            let save =
-                MenuItemBuilder::with_id("save_clip", "Guardar clip (últimos 30 s)").build(app)?;
+            let save = MenuItemBuilder::with_id("save_clip", "Guardar clip").build(app)?; // label set below
             let mute = MenuItemBuilder::with_id("toggle_mic_mute", "Silenciar/activar micrófono")
                 .build(app)?;
             let open =
@@ -674,7 +684,7 @@ pub fn run() {
                 .item(&quit)
                 .build()?;
             app.manage(TrayItems { save: save.clone() });
-            show_save_shortcut_in_tray(app.handle(), &settings.get().shortcuts.save_clip);
+            show_save_in_tray(app.handle(), &settings.get().shortcuts);
             TrayIconBuilder::with_id("clipforge-tray")
                 .icon(app.default_window_icon().expect("app icon").clone())
                 .tooltip("ClipForge")
