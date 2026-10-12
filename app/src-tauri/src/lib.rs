@@ -501,6 +501,14 @@ fn reveal_clip(
         .map_err(|e| format!("no se pudo abrir la carpeta: {e}"))
 }
 
+/// Put the clip's file on the system clipboard, so it can be pasted in a chat,
+/// a mail or a folder as a file.
+#[tauri::command]
+async fn copy_clip(app: AppHandle, name: String) -> Result<(), String> {
+    let path = library::clip_path(&app.state::<Recorder>().clips_dir(), &name)?;
+    blocking(move || clipforge_core::clipboard::copy_file(&path)).await
+}
+
 /// Run blocking clip work (reading and writing files) off the UI thread.
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -635,6 +643,7 @@ pub fn run() {
             rename_clip,
             delete_clip,
             reveal_clip,
+            copy_clip,
             list_folders,
             create_folder,
             update_folder,

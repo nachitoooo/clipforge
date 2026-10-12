@@ -12,5 +12,6 @@ pub mod audio;
 pub mod buffer;
 pub mod capture;
 pub mod clip;
+pub mod clipboard;
 pub mod encode;
 pub mod engine;
