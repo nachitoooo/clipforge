@@ -182,24 +182,25 @@ fn capture_keeps_running_during_extraction() {
     waits.sort();
     let pushes = waits.len();
     let worst_push = *waits.last().unwrap();
-    let typical_push = waits[pushes * 9 / 10]; // the 90th percentile
+    let typical_push = waits[pushes / 2]; // the median
     let avg_save = total_save_time / saves;
 
     println!(
         "concurrency: {saves} saves (avg {avg_save:?}) while {pushes} pushes ran; \
-         worst push wait {worst_push:?}, 90th percentile {typical_push:?}"
+         worst push wait {worst_push:?}, median {typical_push:?}"
     );
     assert!(saves >= 1 && pushes > 0);
     // What we guarantee is lock discipline: the buffer lock is never held
     // while a clip is muxed/written. If it were, the saves would run back to
     // back (as they do here) and *most* pushes would wait for one. A single
     // slow push proves nothing: on a shared CI runner the scheduler alone can
-    // park a thread for tens of ms (this flaked at 67 ms with 48 ms saves). So
-    // the bound is on the 90th percentile of the waits, not on the worst one.
-    let threshold = Duration::from_millis(20).max(avg_save / 4);
+    // park a thread for tens of ms (this flaked at 67 ms and at 88 ms with
+    // 45 ms saves, with only a handful of pushes getting in). So the bound is on
+    // the median of the waits, not on the worst one.
+    let threshold = Duration::from_millis(15).max(avg_save / 4);
     assert!(
         typical_push < threshold,
-        "pushes stalled (90th percentile {typical_push:?}, worst {worst_push:?}) during clip \
+        "pushes stalled (median {typical_push:?}, worst {worst_push:?}) during clip \
          saves (avg save {avg_save:?}) — the save path is likely holding the buffer lock during I/O"
     );
     std::fs::remove_dir_all(&dir).ok();

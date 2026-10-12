@@ -14,10 +14,9 @@ ShadowPlay, without an account and without leaving your machine.
 
 Ready-to-run files are on the [Releases page](https://github.com/nachitoooo/clipforge/releases):
 a Windows installer, a portable Windows `.exe` (double-click, nothing to install)
-and a macOS `.dmg` (Apple silicon). **Recording works on macOS only for now**: the
-Windows files open the interface but can't record yet (see Status below). They are
-not signed, so Windows SmartScreen and macOS Gatekeeper warn the first time; the
-release notes say how to get past that.
+and a macOS `.dmg` (Apple silicon). Both systems record. The files are not signed,
+so Windows SmartScreen and macOS Gatekeeper warn the first time; the release notes
+say how to get past that.
 
 ## What it does today
 
@@ -43,9 +42,17 @@ release notes say how to get past that.
 
 | | macOS | Windows |
 |---|---|---|
-| Capture + hardware encoding | ScreenCaptureKit + VideoToolbox, working | Not implemented yet ([F-2.4](milestones/milestone-2.md)) |
-| Audio (game + microphone) | Working | Compiles in CI, never run |
-| UI, library, editor, settings | Working | Same code; waits on capture |
+| Capture + encoding | ScreenCaptureKit + VideoToolbox (hardware) | Windows Graphics Capture + Media Foundation H.264 (software, no GPU needed) |
+| Audio (game + microphone) | Working | Working (WASAPI loopback, cpal) |
+| UI, library, editor, settings | Working | Working |
+| Screenshots, copy to clipboard | Working | Working |
+
+On Windows, every stage runs on a real Windows machine in CI — screen capture, the
+encoder, the sound, a clip decoded back by Windows, and the installed app started,
+a hotkey pressed and the clip checked (see the `windows-video` and `windows-app`
+workflows). What CI can't give is a gaming PC: the encoder is Microsoft's software
+one (about 150 fps at 1080p on a 4-core runner) and the hardware encoders (NVENC,
+AMF, Quick Sync) are not driven yet.
 
 Progress is tracked feature by feature in [`milestones/`](milestones/); what is
 planned next (compared with what Medal offers) is in
@@ -92,8 +99,9 @@ people as much as to tools:
 - clips are cut by stream copy, never re-encoded;
 - keep `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt` clean.
 
-Windows capture ([F-2.4](milestones/milestone-2.md)) is the biggest open piece and
-a good place to help; see [`docs/windows-setup.md`](docs/windows-setup.md).
+Driving the Windows hardware encoders (NVENC, AMF, Quick Sync) is a good place to
+help: they are asynchronous Media Foundation transforms, and CI has no GPU to test
+them on. See [`docs/windows-setup.md`](docs/windows-setup.md).
 
 ## License
 

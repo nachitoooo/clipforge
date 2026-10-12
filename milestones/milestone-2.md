@@ -30,10 +30,16 @@ last N seconds in memory, and a global hotkey saves them as a clip file.
   Accessibility permission)
 
 ## F-2.4 — Windows parity
-- [ ] `WindowsGraphicsCaptureSource` implements `FrameSource`
-- [ ] `MediaFoundationEncoder` implements `Encoder` (hardware H.264)
-- [ ] Ignored integration tests pass on a Windows machine / CI
-- [ ] Same clip pipeline (buffer/extract/hotkey) verified on Windows
+> **Progress (2026-10-12):** implemented and verified on a real Windows desktop
+> (GitHub Windows runner, with a virtual audio cable for sound). The workflows
+> `windows-video` and `windows-app` run everything below.
+- [x] `WindowsGraphicsCaptureSource` implements `FrameSource` (`core/src/capture/windows/`): Graphics Capture of the primary monitor, scaled to the recording size and paced to the frame rate, timestamps on the QPC clock shared with the audio
+  — 139–153 frames in 4 s with no drops; a still screen still yields a first frame (123 ms); the screenshot is a PNG of the screen's own size
+- [x] `MediaFoundationEncoder` implements `Encoder` (`core/src/encode/mediafoundation.rs`): Microsoft's H.264 encoder MFT, no B-frames, Annex B → AVCC, parameter sets for `avcC`
+  — **software**, not hardware: the asynchronous hardware MFTs (NVENC/AMF/QSV) are not driven yet. Measured on a 4-core runner: 140–178 fps at 1080p (60 needed). The mp4 it makes is decoded back by Windows' own reader: every frame, first picture within 0.04 (luma) / 0.26 (chroma) of what went in
+- [x] Ignored integration tests pass on a Windows machine / CI (`windows_video`, `windows_audio`, `windows_misc`)
+- [x] Same clip pipeline (buffer/extract/hotkey) verified on Windows: the whole recorder saves a clip that Windows plays; and the installed app, started on the runner, saves one when Ctrl+Shift+S is pressed
+- [ ] Not verified: a real GPU and a real game (CI has a software display adapter); hardware encoders; HDR; several monitors (the first one is captured); a monitor whose size changes while recording is handled but untested
 
 ## F-2.5 — Audio tracks (system audio)
 > Added 2026-10-09 (promoted from the backlog: clips were silent). Microphone
@@ -46,6 +52,6 @@ last N seconds in memory, and a global hotkey saves them as a clip file.
 - [x] macOS: system audio via ScreenCaptureKit (excluding ClipForge's own sounds) → AudioToolbox AAC-LC 128 kb/s, same epoch as the video
   — measured 2026-10-09: 5 s of real capture → 239 AAC packets, saved clip has a 48 kHz stereo AAC track; video drop rate still 0.000%
 - [x] Audio never takes the video down: no AAC encoder → silent clips; a `WithAudio` source whose audio fails to start keeps recording video
-- [ ] Windows: WASAPI loopback (`audio/wasapi.rs`) + Media Foundation AAC encoder (`audio/aac_mediafoundation.rs`)
-  — written, cross-checked and linted for `x86_64-pc-windows-msvc`, **never run**. Needs F-2.4 (Windows video) wired in and `cargo test -p clipforge-core --test windows_audio -- --ignored` on a Windows machine; the MF encoder delay (`MF_AAC_PRIMING_FRAMES`) is an assumption to calibrate
+- [x] Windows: WASAPI loopback (`audio/wasapi.rs`) + Media Foundation AAC encoder (`audio/aac_mediafoundation.rs`)
+  — verified 2026-10-12 on a Windows runner with a virtual audio cable: a played 440 Hz tone is heard by loopback at amplitude 0.500, and a recorded clip's AAC track decodes in Windows back to 0.499 at 440 Hz, 0.000 at 1 kHz. The microphone (cpal/WASAPI) delivers chunks too. Still an assumption: the AAC encoder delay `MF_AAC_PRIMING_FRAMES` (audio/video offset not measured by ear)
 - [ ] Manual check on macOS with real game audio: play something, press the hotkey, listen to the clip (the automated real-capture test ran on a silent system, so audio *content* is covered by unit tests and a byte-count check, not by ear)

@@ -50,9 +50,11 @@ hotkey saves the last N seconds as a clip.
 - **Capture (per OS, behind the `FrameSource` trait):**
   - Windows: Windows.Graphics.Capture via the `windows` crate
   - macOS: ScreenCaptureKit via the `screencapturekit` crate
-- **Encoding (per OS, behind the `Encoder` trait, always hardware):**
-  - Windows: Media Foundation H.264/HEVC (NVENC/AMF/QSV resolved by MF)
-  - macOS: VideoToolbox H.264/HEVC
+- **Encoding (per OS, behind the `Encoder` trait):**
+  - Windows: Media Foundation H.264. Today Microsoft's own software encoder MFT
+    (`CMSH264EncoderMFT`: synchronous, no GPU needed, ~150 fps at 1080p); the
+    asynchronous hardware MFTs (NVENC/AMF/QSV) are not driven yet.
+  - macOS: VideoToolbox H.264/HEVC (hardware)
 - **Audio (system/game sound, per OS):**
   - macOS: ScreenCaptureKit audio (same stream as the video) → AudioToolbox AAC-LC
   - Windows: WASAPI loopback → Media Foundation AAC encoder
@@ -134,8 +136,11 @@ starts on a keyframe.
 
 - This machine is a Mac: develop and test the macOS capture path and all
   platform-independent code (buffer, clip, UI) here.
-- The Windows capture/encode path builds and runs via GitHub Actions and a
-  Windows machine/VM; keep it compiling with `cargo check --target
+- The Windows capture/encode path is verified on a real Windows runner:
+  the `windows-video` workflow (screen capture, H.264, sound with a virtual audio
+  cable, a clip decoded back by Windows) and `windows-app` (the built app started,
+  a hotkey pressed, the clip checked). Ignored tests in `core/tests/windows_*.rs`.
+  It builds and runs via GitHub Actions and a Windows machine/VM; keep it compiling with `cargo check --target
   x86_64-pc-windows-msvc` (cross-check only, no link).
 
 ## Build & Run
