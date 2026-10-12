@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use windows::core::{Interface, GUID, HRESULT};
 use windows::Win32::Media::MediaFoundation::{
-    eAVEncCommonRateControlMode_CBR, eAVEncH264VProfile_High, CMSH264EncoderMFT,
+    eAVEncCommonRateControlMode_CBR, eAVEncH264VProfile_Main, CMSH264EncoderMFT,
     CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncCommonQualityVsSpeed,
     CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncMPVDefaultBPictureCount,
     CODECAPI_AVEncMPVGOPSize, CODECAPI_AVLowLatencyMode, ICodecAPI, IMFMediaType, IMFSample,
@@ -159,21 +159,15 @@ impl MediaFoundationEncoder {
                 CoCreateInstance(&CMSH264EncoderMFT, None, CLSCTX_INPROC_SERVER)
                     .map_err(|e| EncodeError::Backend(format!("no H.264 encoder MFT: {e}")))?;
 
-            // Output first: the encoder derives what it accepts as input from it.
-            let output = video_type(&MFVideoFormat_H264, &config)?;
-            set_u32(&output, &MF_MT_AVG_BITRATE, config.bitrate)?;
-            set_u32(
-                &output,
-                &MF_MT_MPEG2_PROFILE,
-                eAVEncH264VProfile_High.0 as u32,
-            )?;
-            transform
-                .SetOutputType(0, &output, 0)
-                .map_err(|e| backend("set output type", e))?;
-
-            // Tuning is best effort: an encoder that refuses one knob still works.
+            // Tuning first, before any media type is set: the encoder reads the
+            // low-latency and B-frame settings when the types are negotiated, and
+            // a stream with B-frames would come out in decode order, not the
+            // order the frames went in. Best effort: a knob the encoder refuses
+            // is reported and skipped.
             if let Ok(api) = transform.cast::<ICodecAPI>() {
                 let knobs: [(&GUID, VARIANT); 6] = [
+                    (&CODECAPI_AVLowLatencyMode, VARIANT::from(true)),
+                    (&CODECAPI_AVEncMPVDefaultBPictureCount, VARIANT::from(0u32)),
                     (
                         &CODECAPI_AVEncCommonRateControlMode,
                         VARIANT::from(eAVEncCommonRateControlMode_CBR.0 as u32),
@@ -186,8 +180,6 @@ impl MediaFoundationEncoder {
                         &CODECAPI_AVEncMPVGOPSize,
                         VARIANT::from(config.keyframe_interval),
                     ),
-                    (&CODECAPI_AVLowLatencyMode, VARIANT::from(true)),
-                    (&CODECAPI_AVEncMPVDefaultBPictureCount, VARIANT::from(0u32)),
                     (
                         &CODECAPI_AVEncCommonQualityVsSpeed,
                         VARIANT::from(QUALITY_VS_SPEED),
@@ -199,6 +191,20 @@ impl MediaFoundationEncoder {
                     }
                 }
             }
+
+            // Output type first: the encoder derives what it accepts as input from it.
+            // Main profile, not High: it keeps the picture quality of a 12 Mb/s
+            // recording and the stream is simpler for every player to read.
+            let output = video_type(&MFVideoFormat_H264, &config)?;
+            set_u32(&output, &MF_MT_AVG_BITRATE, config.bitrate)?;
+            set_u32(
+                &output,
+                &MF_MT_MPEG2_PROFILE,
+                eAVEncH264VProfile_Main.0 as u32,
+            )?;
+            transform
+                .SetOutputType(0, &output, 0)
+                .map_err(|e| backend("set output type", e))?;
 
             let input = video_type(&MFVideoFormat_NV12, &config)?;
             set_u32(&input, &MF_MT_DEFAULT_STRIDE, config.width)?;
