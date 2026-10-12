@@ -67,6 +67,16 @@ app settings.
 - [ ] Windows: the foreground-window lookup (`activity/windows.rs`) is compiled and linted by the CI cross-check but never run (F-2.4 is open)
 - [ ] Manual check in the app with a real game: play, save a clip with the hotkey, the tray and the button, see the game on the card; alt-tab to another app mid-clip
 
+## F-3.11 — Automatic folders per game
+> **Progress (2026-10-12):** implemented; see "Automatic folders per game" in
+> [`docs/library.md`](../docs/library.md). Needs the game of F-3.10. The UI box
+> stays open until it is checked in the running Tauri window.
+- [x] `library.autoFolders` (off by default): a saved clip joins the folder named after its game, made on the spot if missing; a folder the user made is used untouched; same name in other capitals is the same folder; the 200-folder limit and a bad name only skip the filing, never the save
+  — Rust unit tests (`folders.rs`: new, reuse, capitals, user folder untouched, several folders, stable color, limit, restart, deleted-then-recreated); the call from `AppActions::save_clip` has only been compiled
+- [x] Settings → Biblioteca: the switch, what it does, unavailable (and says why) while game detection is off
+- [ ] Manual check in the app with a real game: save with the hotkey, the tray and the button; the folder appears in the Biblioteca with its clip; delete it and save another
+- [ ] Not yet: file the clips that already exist (a one-time action)
+
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented
 > and verified by tests (see below). Open boxes are things only a person at the

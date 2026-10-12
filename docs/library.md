@@ -117,6 +117,26 @@ trimmed (the copy keeps the game). Both indexes share `persist::JsonStore`.
   un clip» (on by default). Turning it off stops the lookup and forgets what it
   saw; clips already tagged keep their game.
 
+### Automatic folders per game
+
+Configuración → Biblioteca → «Archivar cada clip en la carpeta de su juego»
+(`library.autoFolders`, **off** by default: it makes folders). When a clip is
+saved and has a game, `FolderStore::file_under_game` puts it in the folder with
+that name — one in other capitals counts — and makes the folder first if there is
+none (a game-pad icon and a color picked from the name, the same one every time).
+
+* A folder you made yourself is used as it is: its name, color and icon are never
+  touched, and the clip simply joins the ones it already had. The clip can still
+  be in other folders; filing never moves it.
+* It happens when the clip is saved (hotkey, tray or button), nothing else:
+  correcting a clip's game afterwards doesn't move it, and clips that already
+  exist stay where they are.
+* Delete an automatic folder and the next clip of that game makes it again, as
+  long as the setting is on (ids are never reused, so it is a new folder).
+* It needs the game: with detection off it does nothing, and the switch says so.
+* The 200-folder limit applies: a game that would need the 201st folder is not
+  filed (the clip is saved all the same).
+
 ### Limits
 
 * Clips saved before this existed have no game until it is set by hand.

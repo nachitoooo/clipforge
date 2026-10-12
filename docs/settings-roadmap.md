@@ -16,6 +16,7 @@ surprises, and the settings planned next (in the order we would build them).
 | Level meter | not stored; streamed only while the screen is open | — |
 | Clip length (5 s – 2 min, default 30 s) | `settings.shortcuts.clipSeconds` | live: read when the clip is saved; the tray entry and the gallery button follow |
 | Extra save shortcuts (up to 4, each with its own length) | `settings.shortcuts.extraSaveClip` (`[{ accelerator, seconds }]`) | live: registered with the others, all or nothing (`shortcuts.rs`); a length change registers nothing |
+| File each clip in a folder named after its game | `settings.library.autoFolders` (default off) | read when the clip is saved; needs `detectGame` |
 | Detect the game when a clip is saved | `settings.library.detectGame` (default on) | live: an atomic shared with the activity tracker; off stops the lookup and forgets what it saw |
 
 ## How to add a setting
@@ -153,7 +154,7 @@ capture needs the "buffer will be emptied" warning.
 
 | Idea | Why | Effort | Notes |
 |---|---|---|---|
-| Automatic folders per game or date | Automatic order | S | Library folders exist now (`docs/library.md`): this files each new clip into one on save; comes with the name template and game detection |
+| ~~Automatic folders per game~~ | Done (2026-10-12), see *Today*. Per date, and filing the clips that already exist, are still open | S | `FolderStore::file_under_game` |
 | Favorites / protect from automatic deletion | The storage limit must not delete what matters | M | Depends on the storage limit (wave 2) |
 | Size cap for sharing (10 / 25 / 50 MB) | Clips that fit in a chat message | L | **Conflicts with a rule**: needs re-encoding, while `CLAUDE.md` says ffmpeg only stream-copies. The exception has to be decided first |
 

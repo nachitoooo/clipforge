@@ -35,7 +35,7 @@ exista".
 | 1 | Clips de cualquier duración | **Hecha** (hasta 4 atajos extra, duración propia) | Seguimientos abajo | — | — |
 | 2 | Comparte fácilmente | No | Copiar al portapapeles, aviso de tamaño | S–M | — |
 | 3 | Captura de pantalla | No | Atajo que guarda un PNG | M | — (Windows: F-2.4) |
-| 4 | Biblioteca por juego / perfiles | Juego detectado, sin usarlo | Carpeta automática por juego; perfiles | S → L | 0, 1 |
+| 4 | Biblioteca por juego / perfiles | Carpeta automática por juego **hecha** (4a) | Perfiles por juego (4b) | L | 0, 1 |
 | 5 | Marcadores | No | Atajo «Marcar momento» | M | — |
 | 6 | Edita con facilidad (cámara lenta, zoom, GIF…) | Solo recorte | Exportar… con recodificación | S → L | **Decisión** |
 | 7 | Detección de eventos en juego | No | Eventos por APIs locales oficiales | L | 0, post-roll |
@@ -50,7 +50,7 @@ exista".
 ```
 0 Biblioteca inteligente (hecha)
 ├─ 1 Atajos con duración (hecha) ──────┐
-├─ 4a Carpeta automática por juego     ├─ 4b Perfiles por juego
+├─ 4a Carpeta automática (hecha)       ├─ 4b Perfiles por juego
 ├─ 2 Compartir sin servidor            │
 ├─ 3 Capturas de pantalla              │
 ├─ 5 Marcadores ───────────────────────┼─ 9 Grabación larga
@@ -188,15 +188,15 @@ Graphics Capture).
 están las dos mitades de la «biblioteca por juego» de Medal; falta unirlas.
 Después, que cada juego tenga su configuración.
 
-**Plan A (S): carpeta automática.**
-1. `Settings.library.autoFolderByGame` (por defecto **apagado**: crea cosas sin
-   preguntar).
-2. Al guardar, después de anotar el juego: función pura
-   `plan_game_folder(game, folders)` → usar la carpeta que ya se llama así (sin
-   distinguir mayúsculas) o crear una (color elegido por un hash del nombre, ícono
-   «joystick»), y `add_to_folder`.
-3. Acción «Archivar los clips de cada juego en su carpeta» para los que ya
-   existen.
+**Plan A (S): carpeta automática — hecho (F-3.11).** `library.autoFolders`
+(apagado por defecto: crea carpetas). Al guardar un clip con juego,
+`FolderStore::file_under_game` lo pone en la carpeta de ese nombre (sin distinguir
+mayúsculas) o la crea con ícono de joystick y un color que sale del nombre; una
+carpeta del usuario se usa tal cual. Si se borra, el próximo clip del juego la
+vuelve a crear mientras el ajuste esté prendido (es la propuesta que había aquí).
+Detalle en `docs/library.md`. **Falta:** la acción «Archivar los clips que ya
+existen por juego» (una sola vez) y avisar en el diálogo de borrado que la
+carpeta volverá si el ajuste sigue prendido.
 
 **Plan B (L): perfiles.**
 1. `Settings.profiles: [{ game, clipSeconds, micMode, … }]`.
@@ -210,11 +210,9 @@ Después, que cada juego tenga su configuración.
 
 **Riesgos / decisión abierta.** Los nombres detectados pueden ser feos
 (`VALORANT-Win64-Shipping`): primero corregirlos con «cambiar en todos los clips»,
-y quizá una tabla de alias editable. Si el usuario borra una carpeta
-automática, ¿se recrea con el próximo clip? Propuesta: sí mientras el ajuste
-esté prendido, y el diálogo de borrado avisa.
+y quizá una tabla de alias editable.
 
-**Esfuerzo:** A = S; B = L. **Depende de:** 0 (hecho); B también de 1 y de los
+**Esfuerzo:** A = S (hecho); B = L. **Depende de:** 0 (hecho); B también de 1 (hecho) y de los
 presets de calidad (ola 1).
 
 ---

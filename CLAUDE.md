@@ -116,7 +116,8 @@ front (name only, local, switchable in Settings); a saved clip is tagged with th
 one that held the screen longest and the game lives in `clipmeta.json`, a second
 index with the same rules as the folder one (both on `persist::JsonStore`). The
 hooks in `lib.rs` (`clip_renamed`, `clips_deleted`, `clip_copied`) must keep
-**both** in step. What is planned next is in `docs/medal-roadmap.md`.
+**both** in step. With `library.autoFolders` on, a saved clip is also filed in the
+folder named after its game (`FolderStore::file_under_game`). What is planned next is in `docs/medal-roadmap.md`.
 
 Key design rule: **the ring buffer stores encoded frames** (not raw), so RAM
 stays bounded (~100MB for 2 min of 1080p60) and saving a clip is a remux, not
