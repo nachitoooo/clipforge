@@ -87,7 +87,7 @@ jobs:
               }
             }
           }
-"@
+          "@
           [Tone]::Write("$PWD\artifacts\tone.wav", 14, 440)
           $player = Start-Process powershell -ArgumentList "-NoProfile","-Command","(New-Object Media.SoundPlayer '$PWD\artifacts\tone.wav').PlaySync()" -PassThru
 
@@ -98,7 +98,7 @@ jobs:
             [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
             [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, int flags, int extra);
           }
-"@
+          "@
           for ($i = 0; $i -lt 100; $i++) {
             [Input]::SetCursorPos(200 + ($i * 7) % 600, 200 + ($i * 11) % 400) | Out-Null
             Start-Sleep -Milliseconds 80
