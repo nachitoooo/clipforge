@@ -806,6 +806,14 @@ kbd {
   transform: translateX(18px);
 }
 
+.switch-input:disabled {
+  cursor: not-allowed;
+}
+
+.switch-input:disabled + .switch-track {
+  opacity: 0.45;
+}
+
 .switch-input:focus-visible + .switch-track {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

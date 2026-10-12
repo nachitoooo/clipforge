@@ -33,6 +33,11 @@ export interface LibrarySettings {
    * recorded (its game). Only the application's name, kept on this machine.
    */
   detectGame: boolean;
+  /**
+   * File each new clip in a folder named after its game (made if missing). Off
+   * by default, and without effect while `detectGame` is off.
+   */
+  autoFolders: boolean;
 }
 
 export interface Settings {
@@ -83,7 +88,7 @@ export function defaultSettings(): Settings {
       muted: false,
       muteShortcut: DEFAULT_MUTE_SHORTCUT,
     },
-    library: { detectGame: true },
+    library: { detectGame: true, autoFolders: false },
   };
 }
 

@@ -773,10 +773,58 @@ describe("the library section", () => {
     q<HTMLInputElement>('input[aria-label="Detectar el juego al guardar un clip"]');
   const libraryPanel = () => q<HTMLElement>('[aria-labelledby="library-title"]');
 
-  function libSettings(detectGame: boolean): Settings {
+  function libSettings(detectGame: boolean, autoFolders = false): Settings {
     const s = defaultSettings();
-    return { ...s, library: { detectGame } };
+    return { ...s, library: { detectGame, autoFolders } };
   }
+
+  const autoSwitch = () =>
+    q<HTMLInputElement>('input[aria-label="Archivar cada clip en la carpeta de su juego"]');
+  const flip = (input: HTMLInputElement, checked: boolean) => {
+    input.checked = checked;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+
+  it("automatic folders are off by default and say what they do", async () => {
+    await mount();
+    expect(autoSwitch().checked).toBe(false);
+    expect(autoSwitch().disabled).toBe(false);
+    const text = libraryPanel().textContent;
+    expect(text).toContain("con el nombre de su juego");
+    expect(text).toContain("Los clips que ya tenés no se mueven");
+    expect(text).not.toContain("Necesita que la detección");
+  });
+
+  it("switching automatic folders on saves at once and changes nothing else", async () => {
+    await mount();
+    flip(autoSwitch(), true);
+    await settle();
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    const saved = lastSaved();
+    expect(saved.library).toEqual({ detectGame: true, autoFolders: true });
+    expect(saved.microphone).toEqual(defaultSettings().microphone);
+    expect(saved.shortcuts).toEqual(defaultSettings().shortcuts);
+  });
+
+  it("shows what was saved, and keeps the choice while detection is off", async () => {
+    await mount(libSettings(true, true));
+    expect(autoSwitch().checked).toBe(true);
+    flip(detectSwitch(), false);
+    await settle();
+    expect(lastSaved().library).toEqual({ detectGame: false, autoFolders: true });
+    expect(autoSwitch().checked).toBe(true);
+  });
+
+  it("is unavailable, and says why, while the game is not being detected", async () => {
+    await mount(libSettings(false, false));
+    expect(autoSwitch().disabled).toBe(true);
+    expect(libraryPanel().textContent).toContain("Necesita que la detección del juego esté activada");
+
+    flip(detectSwitch(), true);
+    await settle();
+    expect(autoSwitch().disabled).toBe(false);
+    expect(libraryPanel().textContent).not.toContain("Necesita que la detección");
+  });
 
   it("shows game detection on by default", async () => {
     await mount();

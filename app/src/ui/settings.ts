@@ -335,6 +335,10 @@ export function createSettings(root: HTMLElement): SettingsView {
   const detectSwitch = switchControl("Detectar el juego al guardar un clip", (checked) =>
     changeLibrary({ detectGame: checked }),
   );
+  const autoFoldersSwitch = switchControl("Archivar cada clip en la carpeta de su juego", (checked) =>
+    changeLibrary({ autoFolders: checked }),
+  );
+  const autoFoldersRow = liveRow("Archivar cada clip en la carpeta de su juego", autoFoldersSwitch.el);
   const libraryPanel = h(
     "section",
     { class: "panel", "aria-labelledby": "library-title" },
@@ -356,6 +360,7 @@ export function createSettings(root: HTMLElement): SettingsView {
         "Anota qué aplicación estaba en primer plano mientras se grababa, para buscar y filtrar tus clips por juego. Solo guarda el nombre de la aplicación, no lo que se ve en pantalla, y se queda en esta computadora. Los clips que ya tenés no cambian; el juego de cada uno se puede corregir a mano.",
         detectSwitch.el,
       ),
+      autoFoldersRow.el,
     ),
   );
 
@@ -505,6 +510,11 @@ export function createSettings(root: HTMLElement): SettingsView {
     renderExtras();
     resetSaveShortcut.hidden = settings.shortcuts.saveClip === DEFAULT_SAVE_SHORTCUT;
     detectSwitch.input.checked = settings.library.detectGame;
+    autoFoldersSwitch.input.checked = settings.library.autoFolders;
+    autoFoldersSwitch.input.disabled = !settings.library.detectGame;
+    autoFoldersRow.hint.textContent =
+      "Al guardar un clip lo pone en una carpeta con el nombre de su juego. La crea si no existe; si ya tenés una con ese nombre, la usa tal cual. Los clips que ya tenés no se mueven, y si borrás una de estas carpetas, el próximo clip de ese juego la vuelve a crear." +
+      (settings.library.detectGame ? "" : " Necesita que la detección del juego esté activada.");
     meterHint.textContent = !mic.enabled
       ? ""
       : mic.muted

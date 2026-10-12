@@ -74,8 +74,9 @@ describe("settings helpers", () => {
     expect(original.shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
   });
 
-  it("game detection is on by default", () => {
+  it("game detection is on by default, and automatic folders are off", () => {
     expect(defaultSettings().library.detectGame).toBe(true);
+    expect(defaultSettings().library.autoFolders).toBe(false);
   });
 
   it("patches the library section without touching the rest or the original", () => {
