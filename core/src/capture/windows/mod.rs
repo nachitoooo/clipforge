@@ -58,6 +58,14 @@ const POOL_BUFFERS: i32 = 3;
 /// stop flag again.
 const IDLE_WAIT: Duration = Duration::from_millis(100);
 
+/// Step-by-step trace for diagnosing a crash in the Windows APIs: set
+/// `CLIPFORGE_WGC_TRACE=1`.
+fn trace(step: &str) {
+    if std::env::var_os("CLIPFORGE_WGC_TRACE").is_some() {
+        eprintln!("[wgc {:?}] {step}", std::thread::current().id());
+    }
+}
+
 fn backend(context: &str, e: windows::core::Error) -> CaptureError {
     CaptureError::Backend(format!("{context}: {e}"))
 }
@@ -197,7 +205,9 @@ impl Session {
         wake: Arc<(Mutex<bool>, Condvar)>,
     ) -> Result<Self, CaptureError> {
         init_runtime();
+        trace("open: item");
         let item = primary_monitor_item()?;
+        trace("open: device");
 
         // A real GPU when there is one; the software rasterizer (WARP) on a
         // virtual machine or a server.
@@ -210,6 +220,7 @@ impl Session {
             .and_then(|inspectable| inspectable.cast())
             .map_err(|e| backend("Windows Runtime device", e))?;
 
+        trace("open: pool");
         let pool_size = item.Size().map_err(|e| backend("monitor size", e))?;
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &winrt_device,
@@ -230,6 +241,7 @@ impl Session {
             .FrameArrived(&handler)
             .map_err(|e| backend("frame arrived handler", e))?;
 
+        trace("open: session");
         let capture = pool
             .CreateCaptureSession(&item)
             .map_err(|e| backend("capture session", e))?;
@@ -292,6 +304,7 @@ impl Session {
         out_w: u32,
         out_h: u32,
     ) -> Result<Vec<u8>, CaptureError> {
+        trace("read: surface");
         let surface = frame.Surface().map_err(|e| backend("frame surface", e))?;
         let access: IDirect3DDxgiInterfaceAccess =
             surface.cast().map_err(|e| backend("surface access", e))?;
@@ -305,7 +318,9 @@ impl Session {
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         // SAFETY: `desc` is a local the call fills in.
         unsafe { texture.GetDesc(&mut desc) };
+        trace("read: staging");
         let staging = self.staging_for(&desc)?;
+        trace("read: copy");
 
         // SAFETY: both textures are live and the same size and format; the
         // mapped pointer is valid until `Unmap`, and everything read from it is
@@ -398,9 +413,13 @@ pub fn capture_one_frame(timeout: Duration) -> Result<(Vec<u8>, u32, u32), Captu
 
 impl Drop for Session {
     fn drop(&mut self) {
+        trace("drop: remove handler");
         let _ = self.pool.RemoveFrameArrived(self.handler_token);
+        trace("drop: close session");
         let _ = self.capture.Close();
+        trace("drop: close pool");
         let _ = self.pool.Close();
+        trace("drop: done");
         let _ = &self.item;
     }
 }

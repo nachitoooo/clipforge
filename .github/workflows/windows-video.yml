@@ -33,11 +33,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Release build: the real app is one, and speed is what is being measured.
+      # Each test runs in a process of its own, so one that crashes the process
+      # cannot hide the results of the others.
       - name: Video tests (screen capture, H.264, the recorder)
         shell: bash
         env:
           CLIPFORGE_TEST_OUT: ${{ github.workspace }}/test-output
-        run: cargo test --release -p clipforge-core --test windows_video -- --ignored --nocapture --test-threads=1
+          CLIPFORGE_WGC_TRACE: "1"
+        run: |
+          cargo test --release -p clipforge-core --test windows_video --no-run
+          tests=$(cargo test --release -p clipforge-core --test windows_video -- --ignored --list 2>/dev/null | sed -n 's/: test$//p')
+          failed=0
+          for t in $tests; do
+            echo "::group::$t"
+            if cargo test --release -p clipforge-core --test windows_video -- --ignored --exact "$t" --nocapture; then
+              echo "RESULT ok: $t"
+            else
+              echo "RESULT FAILED: $t"; failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed
 
       - name: Other Windows checks (foreground application, clipboard)
         if: always()

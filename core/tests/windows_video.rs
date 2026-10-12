@@ -61,7 +61,7 @@ fn decode_with_windows(path: &Path) -> Decoded {
     // before `MFShutdown`.
     unsafe {
         MFStartup(MF_VERSION, MFSTARTUP_FULL).expect("MFStartup");
-        let decoded = (|| {
+        let decode = || {
             let mut attributes = None;
             MFCreateAttributes(&mut attributes, 1).expect("attributes");
             let attributes = attributes.unwrap();
@@ -120,7 +120,8 @@ fn decode_with_windows(path: &Path) -> Decoded {
                 frames,
                 first_frame,
             }
-        })();
+        };
+        let decoded = decode();
         let _ = MFShutdown();
         decoded
     }
