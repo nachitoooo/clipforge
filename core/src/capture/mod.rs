@@ -6,7 +6,11 @@ pub mod clock;
 pub mod combined;
 #[cfg(target_os = "macos")]
 pub mod macos;
+pub mod pacer;
+pub mod scale;
 pub mod test_pattern;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 use std::time::Duration;
 

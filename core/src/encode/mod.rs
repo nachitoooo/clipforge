@@ -1,8 +1,15 @@
-//! Hardware encoders behind the [`Encoder`] trait: VideoToolbox on macOS,
-//! Media Foundation on Windows. Software encoding is never used — clips are
-//! remuxed, not re-encoded.
+//! Video encoders behind the [`Encoder`] trait: VideoToolbox (hardware) on
+//! macOS, Media Foundation on Windows. Clips are remuxed, never re-encoded.
+//!
+//! On Windows the Media Foundation encoder in use is Microsoft's own H.264 one
+//! (software, needs no GPU); the asynchronous hardware encoders are not driven
+//! yet.
 
+pub mod annexb;
+#[cfg(target_os = "windows")]
+pub mod mediafoundation;
 pub mod mock;
+pub mod nv12;
 #[cfg(target_os = "macos")]
 pub mod videotoolbox;
 

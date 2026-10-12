@@ -1,0 +1,51 @@
+name: Windows video
+
+# Runs the Windows-only integration tests (real screen capture, the Media
+# Foundation encoders, the whole recorder) on a GitHub Windows runner, which has
+# a desktop session, and keeps the files they write. Manual, and on pushes that
+# touch the Windows code.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "core/src/capture/windows/**"
+      - "core/src/capture/pacer.rs"
+      - "core/src/capture/scale.rs"
+      - "core/src/encode/**"
+      - "core/src/audio/wasapi.rs"
+      - "core/src/audio/aac_mediafoundation.rs"
+      - "core/tests/windows_*.rs"
+      - ".github/workflows/windows-video.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-video:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Video tests (screen capture, H.264, the recorder)
+        shell: bash
+        env:
+          CLIPFORGE_TEST_OUT: ${{ github.workspace }}/test-output
+        run: cargo test -p clipforge-core --test windows_video -- --ignored --nocapture --test-threads=1
+
+      - name: Audio tests (WASAPI loopback, AAC, microphone)
+        if: always()
+        shell: bash
+        run: cargo test -p clipforge-core --test windows_audio -- --ignored --nocapture --test-threads=1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-video-output
+          path: test-output
+          if-no-files-found: warn
