@@ -14,6 +14,8 @@ surprises, and the settings planned next (in the order we would build them).
 | Microphone volume 0–200 % | `settings.microphone.gainPercent` | instantly (an atomic shared with the audio thread) |
 | Mute + global shortcut | `settings.microphone.muted`, `muteShortcut` | instantly |
 | Level meter | not stored; streamed only while the screen is open | — |
+| Clip length (5 s – 2 min, default 30 s) | `settings.shortcuts.clipSeconds` | live: read when the clip is saved; the tray entry and the gallery button follow |
+| Extra save shortcuts (up to 4, each with its own length) | `settings.shortcuts.extraSaveClip` (`[{ accelerator, seconds }]`) | live: registered with the others, all or nothing (`shortcuts.rs`); a length change registers nothing |
 | Detect the game when a clip is saved | `settings.library.detectGame` (default on) | live: an atomic shared with the activity tracker; off stops the lookup and forgets what it saw |
 
 ## How to add a setting
@@ -42,7 +44,10 @@ all-or-nothing (and lets two shortcuts swap keys), `register_all` never stops th
 app from starting when another application owns the keys (the user gets a
 notification instead). To add one: a field in `ShortcutSettings`, an entry in
 `shortcuts::wanted`, a `ShortcutAction`, and a `createShortcutRecorder` row in
-the UI that lists the other shortcuts in its `conflict` callback.
+the UI that lists the other shortcuts in its `conflict` callback
+(`shortcutOwners` in `lib/settings.ts` already lists them all). `switch` compares
+the registrations as a set of key combinations, so a list that grows or shrinks
+(the extra save shortcuts) needs nothing more.
 
 A shortcut may be a single key only if the key types nothing (F1–F24, Insert,
 Home, End, PageUp, PageDown, Pause, PrintScreen, ScrollLock): registered
@@ -67,7 +72,7 @@ order, not a promise.
 | Setting | Why | Effort | Notes |
 |---|---|---|---|
 | Buffer length (60 / 120 / 180 s) | History vs. RAM | S | `BufferConfig`; restarting the buffer loses what's recorded |
-| Default clip length (15 / 30 / 60 / 120 s) | Fixed at 30 s today | S | `DEFAULT_CLIP_SECONDS` in `recorder.rs` |
+| ~~Default clip length (15 / 30 / 60 / 120 s)~~ | Done (2026-10-12): see *Today*, together with the extra save shortcuts | S | `settings.shortcuts.clipSeconds` |
 | Clips folder | Fixed at `~/Movies/ClipForge` | S | The `asset` protocol scope in `tauri.conf.json` must follow it |
 | Launch at login | Buffer already running when you play | S | Autostart plugin |
 | Video quality (Low / Medium / High / Custom) | Resolution, fps, bitrate | M | `EncoderConfig`; restarts the video capture (warn: buffer is lost) |

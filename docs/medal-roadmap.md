@@ -18,7 +18,8 @@ orden se decide al empezar cada uno.
 | Audio del juego y micrófono (mezclado o en pista aparte) | F-2.5, F-3.3 |
 | Galería, editor de recortes con una línea por pista de audio | F-3.1, F-3.2 |
 | Carpetas (un clip en varias) | F-3.9, `docs/library.md` |
-| **Biblioteca inteligente**: buscar, filtrar y ordenar; juego detectado | F-3.10 (esta entrega) |
+| **Biblioteca inteligente**: buscar, filtrar y ordenar; juego detectado | F-3.10 |
+| **Atajos con distinta duración**: la duración del atajo principal y hasta 4 atajos más | F-3.5 |
 
 **Bloqueo transversal: F-2.4 (paridad Windows).** Hoy no existe captura ni
 codificador de Windows (`Recorder::start` devuelve un error fuera de macOS), así
@@ -31,7 +32,7 @@ exista".
 | # | Función (Medal) | ClipForge hoy | Siguiente paso | Esf. | Depende de |
 |---|---|---|---|---|---|
 | 0 | Biblioteca inteligente | **Hecha** | Seguimientos en el backlog | — | — |
-| 1 | Clips de cualquier duración | Fijo en 30 s | Atajos con distinta duración | S–M | — |
+| 1 | Clips de cualquier duración | **Hecha** (hasta 4 atajos extra, duración propia) | Seguimientos abajo | — | — |
 | 2 | Comparte fácilmente | No | Copiar al portapapeles, aviso de tamaño | S–M | — |
 | 3 | Captura de pantalla | No | Atajo que guarda un PNG | M | — (Windows: F-2.4) |
 | 4 | Biblioteca por juego / perfiles | Juego detectado, sin usarlo | Carpeta automática por juego; perfiles | S → L | 0, 1 |
@@ -48,7 +49,7 @@ exista".
 
 ```
 0 Biblioteca inteligente (hecha)
-├─ 1 Atajos con duración ──────────────┐
+├─ 1 Atajos con duración (hecha) ──────┐
 ├─ 4a Carpeta automática por juego     ├─ 4b Perfiles por juego
 ├─ 2 Compartir sin servidor            │
 ├─ 3 Capturas de pantalla              │
@@ -85,39 +86,29 @@ un juego real y en Windows.
 
 ---
 
-## 1. Atajos con distinta duración
+## 1. Atajos con distinta duración — hecha (F-3.5)
 
-**Qué es / por qué.** Medal deja guardar «los últimos segundos o minutos». Hoy
-todo clip dura 30 s (`DEFAULT_CLIP_SECONDS`, `recorder.rs`) y la UI lo repite
-en el texto de la bandeja, el botón de la galería y Configuración.
+Medal deja guardar «los últimos segundos o minutos». Ahora el atajo principal
+tiene su duración (`shortcuts.clipSeconds`, 30 s por defecto, de 5 s hasta los 2
+min del buffer) y se pueden sumar hasta 4 atajos más, cada uno con la suya
+(`shortcuts.extraSaveClip`: F9 para los últimos 15 s, F10 para el último
+minuto…). La bandeja y el botón de la galería guardan la duración principal y
+la muestran. Las reglas de teclas son las de siempre (`works_alone`), y todos
+los atajos tienen que ser distintos entre sí y del de silenciar.
 
-**Estado hoy.** Un solo atajo (`shortcuts.saveClip`); `shortcuts::wanted` es un
-arreglo fijo de 2 entradas; `Command::SaveClip` no lleva duración.
+Cómo quedó, para quien toque esto después:
+* `shortcuts::switch` compara las registraciones como un **conjunto** de
+  combinaciones, no por posición, así que la lista puede crecer y achicarse; si
+  solo cambia una duración no se llama al sistema (la acción se busca al apretar
+  la tecla). Si el SO rechaza una, se devuelve todo como estaba.
+* `Command::SaveClip(Option<u64>)`: `None` es «la duración de Configuración»
+  (bandeja y botón); un atajo manda la suya.
+* La fila de un atajo nuevo escucha las teclas apenas se agrega; una fila sin
+  teclas no se guarda (el motor exige que cada atajo sea válido).
 
-**Plan.**
-1. `Settings`: `library`/`clips` gana `clipSeconds` (la duración del atajo
-   principal, por defecto 30 — absorbe «Default clip length» de la ola 1) y
-   `extraSaveShortcuts: [{ accelerator, seconds }]` (hasta 4).
-2. `shortcuts.rs`: `wanted` pasa a devolver un `Vec`; `ShortcutAction::SaveClip(u64)`;
-   `action_for`, `register_all` y `switch` ya trabajan en conjunto, solo
-   cambia el tamaño (se amplía el `Fake` de los tests con N atajos).
-3. `dispatch.rs`: `Command::SaveClip(seconds)` y `Actions::save_clip(seconds)`;
-   el ítem de la bandeja usa `clipSeconds`.
-4. `Settings::validated`: segundos entre 5 y el largo del buffer (120), atajos
-   todos distintos entre sí y con el de silenciar, misma regla de «una tecla
-   sola» (`works_alone`).
-5. UI: en el panel Atajos, una fila por atajo extra (grabador de teclas + selector
-   de 15 s / 30 s / 1 min / 2 min + quitar) y «Agregar atajo»; los textos «30
-   segundos» pasan a leer la configuración.
-
-**Pruebas.** Rust: validación (duplicados, rango), `switch` con N atajos y
-reversión si el SO rechaza uno. TS: filas repetibles, conflictos entre filas.
-
-**Riesgos.** Con el buffer recién iniciado el clip sale más corto (ya pasa hoy);
-mostrar la duración real en el aviso. Más atajos globales = más chances de
-chocar con otra app: el error ya se muestra con el motivo.
-
-**Esfuerzo:** S–M. **Depende de:** nada.
+Con el buffer recién iniciado el clip sale más corto que lo pedido; la
+notificación «Clip guardado» ya dice los segundos reales. Seguimiento posible:
+una entrada de la bandeja por cada atajo extra.
 
 ---
 

@@ -84,7 +84,10 @@ app settings.
 
 ## F-3.5 — Settings, wave 1
 - [ ] Buffer length (60 / 120 / 180 s)
-- [ ] Default clip length (15 / 30 / 60 / 120 s)
+- [x] Default clip length (15 s / 30 s / 1 min / 2 min; any value from 5 s to the buffer's 2 min): `shortcuts.clipSeconds` is what the main shortcut, the tray entry and the window's button save, and the three show it
+  — Rust tests (clamping, old files get 30 s, tray command); the tray label and the shortcut with a real press are still to be tried by hand
+- [x] Extra save shortcuts, each with its own length (up to 4: F9 for the last 15 s, F10 for the last minute…): same key rules as the main one, all different from each other and from the mute shortcut, moved all-or-nothing with the others, a length change under the same keys needs no OS call; the Atajos panel adds, re-records, changes the length of and removes them
+  — Rust tests (validation, repair of a hand-edited file, `switch` with N shortcuts and rollback) and simulated-DOM tests; driven in headless Chrome against a mock backend, never in the real webview
 - [ ] Clips folder
 - [x] Save-clip shortcut, configurable in Settings → Atajos (record a key combination or a single key that types nothing — F1–F24, Insert, Inicio, Fin, RePág, AvPág, Pausa, ImprPant — "Restablecer" goes back to the default); applied at once, refused with a reason if the OS or another app owns it, kept apart from the mute shortcut; the tray hint and the gallery button show the current one
   — Rust tests (validation, repair of a hand-edited file, all-or-nothing registration with a fake registry) and simulated-DOM tests; pressing a custom shortcut in the real app is still to be tried by hand
