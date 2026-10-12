@@ -1,0 +1,112 @@
+name: Release
+
+# Builds the app on Windows and macOS and, for a version tag, publishes the files
+# as a GitHub release. Run it by hand ("Run workflow") to only *build* and look at
+# the files as workflow artifacts, without publishing anything.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Also publish a release for the tag below"
+        type: boolean
+        default: false
+      tag:
+        description: "Tag to publish, e.g. v0.1.0 (only used when publishing)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            bundles: nsis
+          - name: macOS
+            os: macos-latest
+            bundles: dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install the interface's dependencies
+        working-directory: app
+        run: npm ci
+
+      # `tauri build` builds the interface (npm run build), embeds it in the
+      # program and makes the installer.
+      - name: Build the app
+        working-directory: app
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+
+      - name: Collect the Windows files
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir release-files
+          cp target/release/bundle/nsis/*-setup.exe release-files/
+          # The program on its own: the interface is inside it, so it runs by
+          # double click without installing.
+          cp target/release/clipforge-app.exe release-files/ClipForge-portable-x64.exe
+          ls -l release-files
+
+      - name: Collect the macOS files
+        if: runner.os == 'macOS'
+        run: |
+          mkdir release-files
+          cp target/release/bundle/dmg/*.dmg release-files/
+          ls -l release-files
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipForge-${{ matrix.name }}
+          path: release-files/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: |
+          ls -l release-files
+          # A preview: the Windows build can't record yet (see the notes).
+          gh release create "$TAG" release-files/* \
+            --target "$GITHUB_SHA" \
+            --title "ClipForge $TAG (preview)" \
+            --notes-file .github/release-notes.md \
+            --prerelease

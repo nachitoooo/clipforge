@@ -203,7 +203,12 @@ impl Recorder {
 
     #[cfg(not(target_os = "macos"))]
     pub fn start(&self) -> Result<(), String> {
-        Err("la captura en este sistema operativo llega con F-2.4 (Windows)".into())
+        // Shown to whoever runs the Windows build, so no ticket numbers.
+        Err(
+            "la grabación todavía no está disponible en Windows: esta versión solo \
+             muestra la interfaz. Está en desarrollo; por ahora graba en macOS."
+                .into(),
+        )
     }
 
     /// Stop capturing; the buffered window survives so a clip can still be
