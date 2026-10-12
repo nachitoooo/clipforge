@@ -29,6 +29,14 @@ pub const MAX_NAME_CHARS: usize = 60;
 pub const MAX_FOLDERS: usize = 200;
 pub const DEFAULT_COLOR: &str = "orange";
 pub const DEFAULT_ICON: &str = "folder";
+/// The icon of a folder made automatically for a game.
+pub const AUTO_ICON: &str = "gamepad";
+/// The colors those folders take, one per game, so they are easy to tell apart.
+/// Every id is in the UI's palette (`FOLDER_COLORS` in `lib/folders.ts`); an id
+/// the UI doesn't know would only be drawn in the default color.
+const AUTO_COLORS: [&str; 8] = [
+    "orange", "red", "pink", "purple", "blue", "teal", "green", "yellow",
+];
 const MAX_STYLE_CHARS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,6 +190,19 @@ pub struct FolderInfo {
     pub created_ms: u64,
 }
 
+/// A color for the folder of `game`. The same name gives the same color on every
+/// run and platform, whatever its capitals (FNV-1a, not the std hasher, which
+/// is free to change).
+fn auto_color(game: &str) -> &'static str {
+    let hash = game
+        .to_lowercase()
+        .bytes()
+        .fold(0x811c_9dc5_u32, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+        });
+    AUTO_COLORS[hash as usize % AUTO_COLORS.len()]
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -257,6 +278,45 @@ impl FolderStore {
     }
 
     // ---- membership -------------------------------------------------------
+
+    /// Automatic filing: put `clip` in the folder called `game` (a folder of the
+    /// same name in other capitals counts), making that folder first if it
+    /// doesn't exist yet. A folder the user already has is used as it is: its
+    /// name, color and icon are never touched. All or nothing, like any change.
+    pub fn file_under_game(&self, game: &str, clip: &str) -> Result<(), String> {
+        self.mutate(|index| {
+            let wanted = game.trim().to_lowercase();
+            let at = match index
+                .folders
+                .iter()
+                .position(|f| f.name.to_lowercase() == wanted)
+            {
+                Some(at) => at,
+                None => {
+                    if index.folders.len() >= MAX_FOLDERS {
+                        return Err(format!("no se pueden tener más de {MAX_FOLDERS} carpetas"));
+                    }
+                    let name = index.checked_name(game, None)?;
+                    let color = auto_color(&name).to_string();
+                    index.folders.push(Folder {
+                        id: format!("f{}", index.next_id),
+                        name,
+                        color,
+                        icon: AUTO_ICON.to_string(),
+                        clips: Vec::new(),
+                        created_ms: now_ms(),
+                    });
+                    index.next_id += 1;
+                    index.folders.len() - 1
+                }
+            };
+            let folder = &mut index.folders[at];
+            if !folder.clips.iter().any(|c| c == clip) {
+                folder.clips.push(clip.to_string());
+            }
+            Ok(())
+        })
+    }
 
     /// Make `name` belong to exactly the folders `ids`.
     pub fn set_clip_folders(&self, name: &str, ids: &[String]) -> Result<(), String> {
@@ -821,5 +881,180 @@ mod tests {
         store.rename_clip("a.mp4", "b.mp4").unwrap();
         store.set_clip_folders("x.mp4", &[]).unwrap();
         assert!(!dir.0.join("library.json").exists());
+    }
+
+    // ---- automatic filing by game ----
+
+    fn in_folder(store: &FolderStore, id: &str, clip_name: &str) -> bool {
+        let mut clips = [clip(clip_name, 1)];
+        store.annotate(&mut clips);
+        clips[0].folders.iter().any(|f| f == id)
+    }
+
+    #[test]
+    fn a_game_without_a_folder_gets_one_with_the_clip_in_it() {
+        let dir = TempDir::new("folders-auto-new");
+        let store = store(&dir);
+        store.file_under_game("Valorant", "a.mp4").unwrap();
+
+        let folders = store.list(&[clip("a.mp4", 10)]);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].name, "Valorant");
+        assert_eq!(folders[0].icon, AUTO_ICON);
+        assert!(AUTO_COLORS.contains(&folders[0].color.as_str()));
+        assert_eq!(folders[0].clip_count, 1);
+        assert!(in_folder(&store, &folders[0].id, "a.mp4"));
+    }
+
+    #[test]
+    fn the_next_clip_of_the_same_game_goes_to_the_same_folder() {
+        let dir = TempDir::new("folders-auto-same");
+        let store = store(&dir);
+        store.file_under_game("Valorant", "a.mp4").unwrap();
+        store.file_under_game("Valorant", "b.mp4").unwrap();
+        store.file_under_game("Valorant", "b.mp4").unwrap(); // saving twice changes nothing
+
+        let folders = store.list(&[clip("a.mp4", 1), clip("b.mp4", 1)]);
+        assert_eq!(folders.len(), 1, "no second folder");
+        assert_eq!(folders[0].clip_count, 2);
+    }
+
+    #[test]
+    fn capitals_and_spaces_do_not_make_a_new_folder() {
+        let dir = TempDir::new("folders-auto-case");
+        let store = store(&dir);
+        store.file_under_game("Counter-Strike 2", "a.mp4").unwrap();
+        store
+            .file_under_game("  counter-strike 2 ", "b.mp4")
+            .unwrap();
+        store.file_under_game("COUNTER-STRIKE 2", "c.mp4").unwrap();
+        let folders = store.list(&[]);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(
+            folders[0].name, "Counter-Strike 2",
+            "the first spelling stays"
+        );
+    }
+
+    #[test]
+    fn a_folder_the_user_made_is_used_as_it_is() {
+        let dir = TempDir::new("folders-auto-user");
+        let store = store(&dir);
+        let mine = make(&store, "valorant"); // blue star, made by hand
+        store.add_to_folder(&mine, &names(&["old.mp4"])).unwrap();
+
+        store.file_under_game("Valorant", "new.mp4").unwrap();
+
+        let folders = store.list(&[clip("old.mp4", 1), clip("new.mp4", 1)]);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(
+            (
+                folders[0].name.as_str(),
+                folders[0].color.as_str(),
+                folders[0].icon.as_str()
+            ),
+            ("valorant", "blue", "star"),
+            "name, color and icon are the user's"
+        );
+        assert_eq!(folders[0].clip_count, 2, "its own clips stay");
+    }
+
+    #[test]
+    fn filing_adds_to_the_clips_other_folders_and_does_not_move_it() {
+        let dir = TempDir::new("folders-auto-keeps");
+        let store = store(&dir);
+        let best = make(&store, "Lo mejor");
+        store.add_to_folder(&best, &names(&["a.mp4"])).unwrap();
+        store.file_under_game("Valorant", "a.mp4").unwrap();
+        let mut clips = [clip("a.mp4", 1)];
+        store.annotate(&mut clips);
+        assert_eq!(
+            clips[0].folders.len(),
+            2,
+            "a clip may be in several folders"
+        );
+        assert!(clips[0].folders.contains(&best));
+    }
+
+    #[test]
+    fn each_game_keeps_its_own_color() {
+        // Stable on every run and platform, whatever the capitals.
+        assert_eq!(auto_color("Valorant"), auto_color("VALORANT"));
+        assert_eq!(auto_color("Valorant"), auto_color("valorant"));
+        // Pinned: a change of hash would recolor everybody's folders.
+        assert_eq!(auto_color(""), "teal");
+        assert_eq!(auto_color("Valorant"), "pink");
+        assert_eq!(auto_color("Counter-Strike 2"), "green");
+        // A spread: a handful of games don't all land on one color.
+        let colors: HashSet<_> = [
+            "Valorant",
+            "Counter-Strike 2",
+            "Minecraft",
+            "Fortnite",
+            "Apex Legends",
+            "Rocket League",
+            "League of Legends",
+            "Dota 2",
+        ]
+        .into_iter()
+        .map(auto_color)
+        .collect();
+        assert!(colors.len() >= 4, "{colors:?}");
+        assert!(
+            AUTO_COLORS.iter().all(|c| style_ok(c)),
+            "every id is a valid style"
+        );
+        assert!(style_ok(AUTO_ICON));
+    }
+
+    #[test]
+    fn an_unusable_game_name_changes_nothing() {
+        let dir = TempDir::new("folders-auto-bad");
+        let store = store(&dir);
+        for bad in ["", "   ", "tab\there"] {
+            assert!(store.file_under_game(bad, "a.mp4").is_err(), "{bad:?}");
+        }
+        assert!(store.list(&[]).is_empty());
+        assert!(!dir.0.join("library.json").exists(), "nothing was written");
+    }
+
+    #[test]
+    fn at_the_folder_limit_an_existing_game_still_works_and_a_new_one_is_refused() {
+        let dir = TempDir::new("folders-auto-limit");
+        let store = store(&dir);
+        for n in 0..MAX_FOLDERS - 1 {
+            make(&store, &format!("Carpeta {n}"));
+        }
+        store.file_under_game("Valorant", "a.mp4").unwrap(); // the last free slot
+        store.file_under_game("Valorant", "b.mp4").unwrap(); // reuses it
+        let err = store.file_under_game("Minecraft", "c.mp4").unwrap_err();
+        assert!(err.contains("más de"), "{err}");
+        assert_eq!(store.list(&[]).len(), MAX_FOLDERS);
+    }
+
+    #[test]
+    fn automatic_folders_survive_a_restart() {
+        let dir = TempDir::new("folders-auto-persist");
+        store(&dir).file_under_game("Valorant", "a.mp4").unwrap();
+        let again = store(&dir);
+        let folders = again.list(&[clip("a.mp4", 1)]);
+        assert_eq!(folders[0].name, "Valorant");
+        assert_eq!(folders[0].clip_count, 1);
+        // The id counter went on: the next folder is not f1 again.
+        assert_eq!(make(&again, "Otra"), "f2");
+    }
+
+    #[test]
+    fn a_folder_deleted_by_the_user_is_made_again_for_the_next_clip() {
+        let dir = TempDir::new("folders-auto-recreate");
+        let store = store(&dir);
+        store.file_under_game("Valorant", "a.mp4").unwrap();
+        let first = store.list(&[])[0].id.clone();
+        store.delete(&first).unwrap();
+        store.file_under_game("Valorant", "b.mp4").unwrap();
+        let folders = store.list(&[clip("b.mp4", 1)]);
+        assert_eq!(folders.len(), 1);
+        assert_ne!(folders[0].id, first, "ids are never reused");
+        assert_eq!(folders[0].clip_count, 1, "only the new clip");
     }
 }

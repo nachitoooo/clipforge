@@ -175,11 +175,19 @@ impl Actions for AppActions {
         // The game is whatever held the screen for most of the clip. Saving
         // from the tray or the window works too: ClipForge itself is ignored.
         let game = self.recorder().detected_game(seconds);
-        keep_index(
-            self.app
-                .state::<ClipMetaStore>()
-                .set_detected_game(&name, game.as_deref()),
-        );
+        let meta = self.app.state::<ClipMetaStore>();
+        keep_index(meta.set_detected_game(&name, game.as_deref()));
+        // With automatic folders on, the clip goes into the folder of its game
+        // (the spelling the index kept, so "VALORANT" joins "Valorant").
+        if self.settings().get().library.auto_folders {
+            if let Some(game) = meta.game_of(&name) {
+                keep_index(
+                    self.app
+                        .state::<FolderStore>()
+                        .file_under_game(&game, &name),
+                );
+            }
+        }
         // The gallery refreshes itself on this event (F-3.1 "live update").
         self.app.emit("clip-saved", &name).ok();
         Ok(format!("{:.0} s → {name}", saved.duration.as_secs_f64()))

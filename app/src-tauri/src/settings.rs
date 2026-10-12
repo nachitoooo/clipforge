@@ -132,11 +132,18 @@ pub struct LibrarySettings {
     /// recorded (its "game"). Only the application's name is kept, on this
     /// machine; on by default, switchable off.
     pub detect_game: bool,
+    /// File each new clip in a folder named after its game (made on the spot if
+    /// there is none). Off by default: it creates folders. It needs the game, so
+    /// it does nothing while `detect_game` is off.
+    pub auto_folders: bool,
 }
 
 impl Default for LibrarySettings {
     fn default() -> Self {
-        Self { detect_game: true }
+        Self {
+            detect_game: true,
+            auto_folders: false,
+        }
     }
 }
 
@@ -396,6 +403,10 @@ mod tests {
             s.library.detect_game,
             "game detection is on unless switched off"
         );
+        assert!(
+            !s.library.auto_folders,
+            "making folders by itself is opt-in"
+        );
     }
 
     #[test]
@@ -405,6 +416,33 @@ mod tests {
         let s = SettingsStore::load(dir.file()).get();
         assert!(s.microphone.enabled);
         assert!(s.library.detect_game);
+    }
+
+    #[test]
+    fn automatic_folders_can_be_switched_on_and_stay_on() {
+        let dir = TempDir::new("auto-folders-on");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.library.auto_folders = true;
+        store.replace(s.validated().unwrap()).unwrap();
+        let reloaded = SettingsStore::load(dir.file()).get();
+        assert!(reloaded.library.auto_folders);
+        assert!(
+            reloaded.library.detect_game,
+            "the other switch is untouched"
+        );
+    }
+
+    #[test]
+    fn a_library_section_from_before_automatic_folders_keeps_detection_and_gets_it_off() {
+        let dir = TempDir::new("auto-folders-old");
+        fs::write(dir.file(), r#"{"library":{"detectGame":false}}"#).unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert!(!s.library.detect_game);
+        assert!(!s.library.auto_folders);
+
+        let json = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(json["library"]["autoFolders"], false);
     }
 
     #[test]
