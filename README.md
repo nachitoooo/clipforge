@@ -107,4 +107,5 @@ them on. See [`docs/windows-setup.md`](docs/windows-setup.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The interface uses the [Inter](https://rsms.me/inter/) typeface
+(SIL Open Font License 1.1).

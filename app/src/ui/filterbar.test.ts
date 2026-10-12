@@ -158,6 +158,47 @@ describe("changing the filter", () => {
   });
 });
 
+describe("what is narrowing the list is marked", () => {
+  const isSet = (label: string) => select(label).classList.contains("is-set");
+
+  it("marks nothing while every selector is on 'all'", () => {
+    for (const label of ["Juego", "Carpeta", "Tipo", "Fecha"]) expect(isSet(label)).toBe(false);
+  });
+
+  it("marks the selectors that filter, and not the order", () => {
+    choose(select("Juego"), "valorant");
+    choose(select("Carpeta"), NONE);
+    choose(select("Fecha"), "week");
+    choose(select("Ordenar por"), "size");
+    expect([isSet("Juego"), isSet("Carpeta"), isSet("Fecha")]).toEqual([true, true, true]);
+    expect(isSet("Ordenar por")).toBe(false);
+  });
+
+  it("unmarks one when it goes back to 'all'", () => {
+    choose(select("Juego"), "valorant");
+    choose(select("Juego"), "");
+    expect(isSet("Juego")).toBe(false);
+  });
+
+  it("unmarks everything when the filters are cleared, and when a game disappears", () => {
+    choose(select("Juego"), "fortnite");
+    choose(select("Fecha"), "today");
+    clearButton().click();
+    expect([isSet("Juego"), isSet("Fecha")]).toEqual([false, false]);
+
+    choose(select("Juego"), "fortnite");
+    bar.setData({ clips: clips.filter((c) => c.game !== "Fortnite"), folders });
+    expect(isSet("Juego")).toBe(false);
+  });
+});
+
+describe("the search box", () => {
+  it("has a magnifier next to it", () => {
+    expect(q(".search-field svg")).not.toBeNull();
+    expect(q(".search-field input")).toBe(search());
+  });
+});
+
 describe("clearing", () => {
   it("the button resets every filter, keeps the order and tells the view", () => {
     type("ace");

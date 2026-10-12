@@ -75,7 +75,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
   const el = h(
     "div",
     { class: "filterbar", role: "search" },
-    search,
+    h("div", { class: "search-field" }, svg(icons.search), search),
     gameSelect,
     options.folderSelector ? folderSelect : null,
     kindSelect,
@@ -87,6 +87,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
 
   const changed = () => {
     clear.hidden = !isFiltering(state);
+    markActive();
     options.onChange({ ...state });
   };
 
@@ -123,6 +124,14 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     changed();
   });
 
+  /** A selector that narrows the list is drawn differently from one left on "all". */
+  function markActive() {
+    gameSelect.classList.toggle("is-set", state.game !== null);
+    folderSelect.classList.toggle("is-set", state.folder !== null);
+    kindSelect.classList.toggle("is-set", state.kind !== "all");
+    rangeSelect.classList.toggle("is-set", state.range !== "all");
+  }
+
   function syncControls() {
     search.value = state.query;
     gameSelect.value = state.game ?? "";
@@ -131,6 +140,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     rangeSelect.value = state.range;
     sortSelect.value = state.sort;
     clear.hidden = !isFiltering(state);
+    markActive();
   }
 
   function reset(notify: boolean) {

@@ -117,6 +117,19 @@ app settings.
 - [ ] Manual check in the app: switch it on and off, see the restart, watch the memory in Activity Monitor / Task Manager while recording (this was only estimated from the code: ~350–500 MB in total at 1080p60 normal)
 - [ ] Not yet: a free choice of buffer length and quality (the wave 1 settings), and a bitrate that adapts to the screen size
 
+## F-3.15 — Visual pass
+> **Progress (2026-10-12):** done in CSS, with two tiny DOM touches. Not a UI
+> library: ClipForge's views are plain TypeScript, and a React kit (Arc was
+> looked at) would mean rewriting every view and its tests. The look is now set by
+> tokens in `:root` of `app/src/styles.css`.
+- [x] Surfaces in layers (window, card, raised, input), hairline borders instead of flat grey ones, one radius scale, shadows for cards and for what floats (dialogs, the player), a faint warm glow behind the page title
+- [x] Inter bundled (Latin subset, 48 KB, SIL OFL 1.1) so Windows and macOS show the same letters; thin dark scrollbars; orange text selection
+- [x] Selectors drawn by us (no native arrow); a selector that is narrowing the list is tinted (`is-set`, tested); a magnifier in the search box
+- [x] Rail: marker on the active item, glow on the logo; cards lift on hover, a shade under the duration badge, actions that slide in; day titles with a rule; primary buttons with a gradient and glow; key-cap shortcut buttons; panel titles on a tinted tile; dialogs and the player pop in over a blurred backdrop
+- [x] Looked at in headless Chrome over a mock backend: Recientes, Biblioteca, a folder, Configuración, the player, the editor, the folder / game / low RAM dialogs, filters on, empty library, and a 780 px window
+- [ ] Manual check in the real app, in WebView2 (Windows) and WKWebView (macOS): the font, the blurred backdrops, the scrollbars and the native dropdown list of the selectors
+- [ ] Not yet: a light theme, a labelled (wide) sidebar, thumbnails that preview more than one frame, motion between views
+
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented
 > and verified by tests (see below). Open boxes are things only a person at the
