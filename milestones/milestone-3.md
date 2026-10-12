@@ -90,6 +90,22 @@ app settings.
 - [ ] Windows: `CF_HDROP` never run (F-2.4)
 - [ ] Not yet: drag a clip out of the window into another app (needs a native drag session), "Exportar para Discord" (needs re-encoding, see the roadmap)
 
+## F-3.13 — Screenshots
+> **Progress (2026-10-12):** implemented on macOS. A picture of the whole screen
+> is saved as `captura-<date>-<time>.png` next to the clips and lives in the same
+> library: Recientes, the Biblioteca, folders, search, the game and automatic
+> folders all treat it like a clip, except that it can't be trimmed. The UI boxes
+> stay open until someone checks them in the running Tauri window.
+- [x] `core/src/screenshot/`: `capture_png(path)` — macOS `SCScreenshotManager` (14+) of the first display at its real pixel size (points × scale: 2940×1912 on a Retina laptop, like ⇧⌘3), without ClipForge's own windows; written to a `.part` file and renamed, so a failure leaves nothing the library would list; `captura-…png` names with `-2`, `-3`… for the same second
+  — verified 2026-10-12 against the real screen (`macos_screenshot`, ignored tests: the PNG's own header says the size the call reported, no temporary file left, two in a row are two files); the rest is unit-tested. Windows says it isn't available yet (waits for F-2.4)
+- [x] A shortcut of its own (`shortcuts.screenshot`, **none by default**: nothing is registered that nobody asked for), the tray entry «Tomar captura de pantalla» and the «Captura» button of Recientes; a notification says the size and the name
+  — Rust tests (validation, repair of a hand-edited file, registration/switching with the others, dispatch); the real hotkey, tray and button are still to be tried by hand
+- [x] The library holds `.png` too: `ClipInfo.kind` (`clip` | `screenshot`), `media_path` for what both kinds share (rename keeping the extension, delete, folders, game, copy) and `clip_path` for what only a video can do (the editor refuses a picture)
+- [x] UI: a picture card (the image, its size, no play, no trim), a viewer, the «Tipo» filter (appears with the first screenshot), «N clips y M capturas», and «Copiar» works on a picture; Settings → Atajos → «Captura de pantalla» (record, remove)
+- [ ] Manual check in the app: take a screenshot with the shortcut, the tray and the button (the first time macOS may ask for Screen Recording); see it appear in Recientes; open it, rename it, put it in a folder, copy it and paste it in a chat; make sure ClipForge's own window is not in the picture
+- [ ] Windows: not implemented (needs one frame of Graphics Capture, F-2.4)
+- [ ] Not yet: choosing the monitor (it is the first display, like the replay buffer), a region, an editor for pictures, folder counts that say «capturas» (they still say «clips»)
+
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented
 > and verified by tests (see below). Open boxes are things only a person at the

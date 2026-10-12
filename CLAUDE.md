@@ -74,6 +74,7 @@ core/                  # clipforge-core crate
   src/
     activity/          # foreground-application lookup + log/tracker (the "game" of a clip)
     clipboard/         # put a clip file on the system clipboard (NSPasteboard / CF_HDROP)
+    screenshot/        # a PNG of the screen (SCScreenshotManager), saved next to the clips
     capture/           # FrameSource/AudioSource traits + test_pattern.rs, macos/, windows/
     audio/             # AudioEncoder trait, ContinuityGuard, AAC encoders, WASAPI
     encode/            # Encoder trait + videotoolbox.rs, mediafoundation.rs
@@ -104,6 +105,10 @@ capture empties the buffer, so it needs a warning in the UI. Global
 shortcuts (save clip, mute) are settings too and are (un)registered only through
 `shortcuts.rs`. See `docs/settings-roadmap.md` for the checklist and the planned
 settings.
+
+The clips folder also holds **screenshots** (`.png`, `ClipInfo.kind`): everything
+that works on a name uses `library::media_path` (clip or picture); only the editor
+uses `library::clip_path` (video).
 
 Library folders (`app/src-tauri/src/folders.rs`, `docs/library.md`): a folder is
 a *label* kept in `library.json`, not a directory — clips stay in the flat clips

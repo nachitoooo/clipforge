@@ -137,6 +137,15 @@ none (a game-pad icon and a color picked from the name, the same one every time)
 * The 200-folder limit applies: a game that would need the 201st folder is not
   filed (the clip is saved all the same).
 
+### Screenshots in the library
+
+The clips folder holds `.png` screenshots (F-3.13) next to the `.mp4` clips.
+`ClipInfo.kind` says which is which. A screenshot is filed in folders, has a game
+(the application in front over the last 5 seconds), can be renamed (it keeps its
+`.png`), deleted, searched, copied and put in a folder automatically like a clip; it
+cannot be trimmed. The «Tipo» filter (clips / screenshots) appears with the first
+one. Folder counts still say «clips».
+
 ### Limits
 
 * Clips saved before this existed have no game until it is set by hand.

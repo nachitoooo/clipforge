@@ -22,6 +22,7 @@ orden se decide al empezar cada uno.
 | **Atajos con distinta duración**: la duración del atajo principal y hasta 4 atajos más | F-3.5 |
 | **Carpeta automática por juego** (ajuste, apagado de fábrica) | F-3.11 |
 | **Copiar el clip** al portapapeles como archivo, con aviso si no entra en Discord o un correo | F-3.12 |
+| **Capturas de pantalla** (PNG junto a los clips, en la misma biblioteca) | F-3.13 |
 
 **Bloqueo transversal: F-2.4 (paridad Windows).** Hoy no existe captura ni
 codificador de Windows (`Recorder::start` devuelve un error fuera de macOS), así
@@ -36,7 +37,7 @@ exista".
 | 0 | Biblioteca inteligente | **Hecha** | Seguimientos en el backlog | — | — |
 | 1 | Clips de cualquier duración | **Hecha** (hasta 4 atajos extra, duración propia) | Seguimientos abajo | — | — |
 | 2 | Comparte fácilmente | **Hecha** (copiar el archivo, aviso de tamaño) | Arrastrar hacia afuera; «Exportar para Discord» (6) | M | — |
-| 3 | Captura de pantalla | No | Atajo que guarda un PNG | M | — (Windows: F-2.4) |
+| 3 | Captura de pantalla | **Hecha** en macOS (PNG, atajo opcional, bandeja, botón) | Windows con F-2.4; elegir monitor o región | M | — (Windows: F-2.4) |
 | 4 | Biblioteca por juego / perfiles | Carpeta automática por juego **hecha** (4a) | Perfiles por juego (4b) | L | 0, 1 |
 | 5 | Marcadores | No | Atajo «Marcar momento» | M | — |
 | 6 | Edita con facilidad (cámara lenta, zoom, GIF…) | Solo recorte | Exportar… con recodificación | S → L | **Decisión** |
@@ -54,7 +55,7 @@ exista".
 ├─ 1 Atajos con duración (hecha) ──────┐
 ├─ 4a Carpeta automática (hecha)       ├─ 4b Perfiles por juego
 ├─ 2 Compartir sin servidor (hecha)    │
-├─ 3 Capturas de pantalla              │
+├─ 3 Capturas de pantalla (hecha)      │
 ├─ 5 Marcadores ───────────────────────┼─ 9 Grabación larga
 ├─ 6 Exportar… ─ (decisión) ───────────┘
 ├─ 7 Eventos de juego  (necesita post-roll de la ola 1)
@@ -141,38 +142,32 @@ Discord web, que depende del navegador.
 
 ---
 
-## 3. Capturas de pantalla
+## 3. Capturas de pantalla — hecha en macOS (F-3.13)
 
-**Qué es / por qué.** «Toma una captura con un botón y la añade a tu
-biblioteca.»
+«Toma una captura con un botón y la añade a tu biblioteca.» Un atajo (sin
+ninguno de fábrica), la entrada «Tomar captura de pantalla» de la bandeja o el
+botón «Captura» de Recientes guardan un PNG de la pantalla completa como
+`captura-AAAAMMDD-HHMMSS.png` junto a los clips. Vive en la **misma biblioteca**:
+Recientes, carpetas, búsqueda, juego, carpeta automática y «Copiar» la tratan
+como a un clip; lo único que no se puede hacer es recortarla.
 
-**Estado hoy.** Todo el pipeline es de video: `library::is_clip_file` solo acepta
-`.mp4` y `ClipInfo` no tiene tipo.
+Cómo quedó:
+* `core/src/screenshot/`: `capture_png`. macOS: `SCScreenshotManager` (14+,
+  feature `macos_14_0` del crate), primera pantalla, **tamaño real en píxeles**
+  (puntos × escala: 2940×1912 en una laptop Retina, igual que ⇧⌘3) y sin las
+  ventanas de ClipForge. Escribe a `.part` y renombra: un fallo no deja un PNG a
+  medias en la biblioteca. Verificado contra la pantalla real con tests ignorados.
+* `ClipInfo.kind` (`clip` | `screenshot`). `library::media_path` (cualquiera de
+  los dos) para renombrar —conserva la extensión—, borrar, carpetas, juego y
+  copiar; `library::clip_path` (solo `.mp4`) para el editor, que rechaza una imagen.
+* El juego de una captura es la aplicación en primer plano en los últimos 5 s; si
+  la carpeta automática está prendida, también la archiva.
+* UI: tarjeta con la imagen y su tamaño, visor, filtro «Tipo» (aparece con la
+  primera captura) y «N clips y M capturas».
 
-**Plan.**
-1. `core/src/capture/macos/screenshot.rs`: `SCScreenshotManager::capture_image`
-   (macOS 14+, feature `macos_14_0` del crate `screencapturekit` 8; verificar si
-   ya viene activa) y `save_png`. Excluir las ventanas de ClipForge.
-2. Nombre `shot-YYYYMMDD-HHMMSS.png` en la carpeta de clips, con el mismo
-   desempate `-2`, `-3` de `ClipService::unique_clip_path`.
-3. Atajo propio: `shortcuts.screenshot: Option<String>` (sin atajo por defecto: no
-   se registra nada que el usuario no pidió), `ShortcutAction::Screenshot`,
-   `Command::Screenshot`, notificación.
-4. Biblioteca: `ClipInfo.kind` (`clip` | `screenshot`). `list_clips` incluye
-   `.png`; separar `clip_path` (video: editor, recorte, forma de onda) de un
-   `media_path` más amplio (renombrar, borrar, carpetas, mostrar). La tarjeta y el
-   reproductor muestran `<img>`; la barra de filtros gana «Tipo».
-5. «Copiar» del plan 2 también copia la imagen.
-
-**Pruebas.** Rust: nombres y extensiones, que el editor rechace un `.png`. macOS:
-test ignorado con pantalla real (firma PNG y dimensiones). TS: tarjeta de imagen,
-filtro por tipo.
-
-**Riesgos.** Retina: pedir el tamaño en píxeles, no en puntos. Con varios
-monitores toma el primero (igual que la captura de video, ver plan 11). HDR.
-
-**Esfuerzo:** M en macOS. **Depende de:** nada (Windows: F-2.4, un cuadro de
-Graphics Capture).
+Falta: Windows (un cuadro de Graphics Capture, con F-2.4), elegir el monitor o una
+región (hoy es la primera pantalla, como el buffer; plan 11), un editor de
+imágenes, y que los conteos de las carpetas digan «capturas».
 
 ---
 

@@ -25,7 +25,10 @@ ShadowPlay, without an account and without leaving your machine.
   by game, date and folder, and a game detected from the application that was in
   front while the clip was recorded (name only, kept on your computer, can be
   switched off).
-- Lives in the tray; a clip is never uploaded anywhere.
+- **Screenshots** of the screen (a hotkey you choose, the tray or a button), kept in
+  the same library as the clips. macOS for now.
+- **Copy** a clip or a screenshot to paste it in Discord, Mail and so on.
+- Lives in the tray; nothing is ever uploaded anywhere.
 
 ## Status
 
