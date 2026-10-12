@@ -15,3 +15,4 @@ pub mod clip;
 pub mod clipboard;
 pub mod encode;
 pub mod engine;
+pub mod screenshot;

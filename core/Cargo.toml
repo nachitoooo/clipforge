@@ -15,7 +15,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "m
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-cf = { version = "0.9", default-features = false, features = ["cm", "cv", "iosurface"] }
-screencapturekit = "8.0"
+# macos_14_0: SCScreenshotManager, for the screenshots (macOS 14+ at run time).
+screencapturekit = { version = "8.0", features = ["macos_14_0"] }
 videotoolbox = "0.18"
 # Already in the tree through Tauri; only the two classes the foreground-app
 # lookup needs.
