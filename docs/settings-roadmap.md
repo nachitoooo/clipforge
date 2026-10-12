@@ -18,6 +18,7 @@ surprises, and the settings planned next (in the order we would build them).
 | Extra save shortcuts (up to 4, each with its own length) | `settings.shortcuts.extraSaveClip` (`[{ accelerator, seconds }]`) | live: registered with the others, all or nothing (`shortcuts.rs`); a length change registers nothing |
 | File each clip in a folder named after its game | `settings.library.autoFolders` (default off) | read when the clip is saved; needs `detectGame` |
 | Screenshot shortcut (optional) | `settings.shortcuts.screenshot` (empty = none, the default) | live: registered with the others, all or nothing; the tray entry shows it |
+| Low RAM mode (1 min of buffer at 6 Mb/s instead of 2 min at 12 Mb/s: ~45 MB instead of ~180 MB) | `settings.performance.lowRam` (default off) | **restarts the video capture** and empties the buffer: the UI asks first; both numbers live in `memory.rs` |
 | Detect the game when a clip is saved | `settings.library.detectGame` (default on) | live: an atomic shared with the activity tracker; off stops the lookup and forgets what it saw |
 
 ## How to add a setting
@@ -73,11 +74,11 @@ order, not a promise.
 
 | Setting | Why | Effort | Notes |
 |---|---|---|---|
-| Buffer length (60 / 120 / 180 s) | History vs. RAM | S | `BufferConfig`; restarting the buffer loses what's recorded |
+| Buffer length (60 / 120 / 180 s) | History vs. RAM | S | `BufferConfig`; restarting the buffer loses what's recorded. *Low RAM mode* already switches between 120 s and 60 s (`ReplayBuffer::set_config` exists); a free choice is the same plumbing |
 | ~~Default clip length (15 / 30 / 60 / 120 s)~~ | Done (2026-10-12): see *Today*, together with the extra save shortcuts | S | `settings.shortcuts.clipSeconds` |
 | Clips folder | Fixed at `~/Movies/ClipForge` | S | The `asset` protocol scope in `tauri.conf.json` must follow it |
 | Launch at login | Buffer already running when you play | S | Autostart plugin |
-| Video quality (Low / Medium / High / Custom) | Resolution, fps, bitrate | M | `EncoderConfig`; restarts the video capture (warn: buffer is lost) |
+| Video quality (Low / Medium / High / Custom) | Resolution, fps, bitrate | M | `EncoderConfig`; restarts the video capture (warn: buffer is lost). The first step is built: *Low RAM mode* picks one preset (6 Mb/s); a real picker would generalize `memory::MemoryPlan` |
 | Post-roll (keep recording 0 / 5 / 10 / 15 s after the shortcut) | The clip includes how the play ended, not only what led to it | M | Save with a delay: wait N s, then extract. Today the clip ends at the key press |
 | Pause the buffer with a shortcut | Privacy: type a password without it being recorded | S | Stop/start the capture (also empties the buffer); the tray already has the entry |
 | Tray icon with state (recording / paused / error) | See if the buffer runs without opening the app | S | The tray exists |

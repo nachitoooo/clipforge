@@ -7,7 +7,7 @@ import type { BufferStatus } from "./lib/buffer";
 import type { ClipInfo } from "./lib/clips";
 import type { EditorClip, TrimRequest, TrimResult } from "./lib/editor";
 import type { FolderDraft, FolderInfo } from "./lib/folders";
-import type { MicDevice, MicStatus, Settings } from "./lib/settings";
+import type { MemoryPlans, MicDevice, MicStatus, Settings } from "./lib/settings";
 import type { Waveform } from "./lib/waveform";
 
 export const listClips = () => invoke<ClipInfo[]>("list_clips");
@@ -61,6 +61,8 @@ export const onBufferChanged = (cb: (status: BufferStatus) => void): Promise<Unl
   listen<BufferStatus>("buffer-changed", (e) => cb(e.payload));
 
 export const getSettings = () => invoke<Settings>("get_settings");
+/** What each memory mode (normal / low RAM) costs. */
+export const memoryPlans = () => invoke<MemoryPlans>("memory_plans");
 export const updateSettings = (settings: Settings) =>
   invoke<Settings>("update_settings", { settings });
 export const listMicrophones = () => invoke<MicDevice[]>("list_microphones");

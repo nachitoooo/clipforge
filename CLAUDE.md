@@ -100,6 +100,11 @@ by `audio/mixer.rs` (between the system capture and the encoder) or as its own
 lane; it shares the video's `SharedEpoch` clock. Never mix at save time — that
 would mean decoding and re-encoding.
 
+Memory (`app/src-tauri/src/memory.rs`): the replay buffer's RAM is its length times
+its bitrate (about 180 MB by default); *low RAM mode* (`settings.performance.lowRam`)
+halves both. Fixed when the capture starts, so changing it restarts the capture
+(`Settings::needs_capture_restart`) and the UI warns first.
+
 Settings (`app/src-tauri/src/settings.rs`): every field has a serde default, one
 validation gate (`Settings::validated`), and an apply path that is either live
 (atomics) or restarts only the affected part. Anything that restarts the video

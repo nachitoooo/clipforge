@@ -138,6 +138,18 @@ impl ReplayBuffer {
         }
     }
 
+    pub fn config(&self) -> &BufferConfig {
+        &self.config
+    }
+
+    /// Change how much is kept. A smaller window drops whole GOPs from the front
+    /// at once (so RAM falls right away); the audio lanes follow on their next
+    /// packet.
+    pub fn set_config(&mut self, config: BufferConfig) {
+        self.config = config;
+        self.evict();
+    }
+
     /// Add one encoded packet (decode order, monotonic pts expected).
     pub fn push(&mut self, packet: EncodedPacket) -> PushOutcome {
         // Discontinuity: pts went backwards — drop history, start over.
@@ -432,6 +444,81 @@ mod audio_tests {
         buffer.push(video(0, 60)); // video pts jumps back: new epoch
         assert_eq!(buffer.audio_packet_count(), 0);
         assert_eq!(buffer.audio_memory_bytes(), 0);
+    }
+
+    #[test]
+    fn a_smaller_window_drops_the_oldest_gops_at_once() {
+        let mut buffer = filled(30, 60); // 30 s of video, a keyframe every 60 frames
+        let before = buffer.memory_bytes();
+        buffer.set_config(BufferConfig {
+            max_duration: Duration::from_secs(10),
+            ..Default::default()
+        });
+        assert!(
+            buffer.duration() <= Duration::from_secs(10),
+            "{:?}",
+            buffer.duration()
+        );
+        assert!(
+            buffer.duration() >= Duration::from_secs(8),
+            "whole GOPs, not everything"
+        );
+        assert!(buffer.memory_bytes() < before, "RAM fell right away");
+        assert!(
+            buffer.packets.front().unwrap().is_keyframe,
+            "still starts on a keyframe"
+        );
+        assert_eq!(buffer.config().max_duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_bigger_window_keeps_what_there_is_and_the_new_limit_applies_from_now() {
+        let mut buffer = ReplayBuffer::new(BufferConfig {
+            max_duration: Duration::from_secs(10),
+            ..Default::default()
+        });
+        for n in 0..60 * 9 {
+            buffer.push(video(n, 60));
+        }
+        let kept = buffer.packet_count();
+        buffer.set_config(BufferConfig {
+            max_duration: Duration::from_secs(60),
+            ..Default::default()
+        });
+        assert_eq!(buffer.packet_count(), kept);
+        for n in 60 * 9..60 * 40 {
+            buffer.push(video(n, 60));
+        }
+        assert!(
+            buffer.duration() > Duration::from_secs(30),
+            "{:?}",
+            buffer.duration()
+        );
+    }
+
+    #[test]
+    fn a_lower_byte_cap_applies_too() {
+        let mut buffer = filled(30, 60);
+        let held = buffer.memory_bytes();
+        buffer.set_config(BufferConfig {
+            max_bytes: held / 3,
+            ..Default::default()
+        });
+        assert!(
+            buffer.memory_bytes() <= held / 3 || buffer.is_empty(),
+            "{}",
+            buffer.memory_bytes()
+        );
+    }
+
+    #[test]
+    fn shrinking_an_empty_buffer_is_harmless() {
+        let mut buffer = ReplayBuffer::new(BufferConfig::default());
+        buffer.set_config(BufferConfig {
+            max_duration: Duration::from_secs(1),
+            max_bytes: 1,
+        });
+        assert!(buffer.is_empty());
     }
 
     #[test]

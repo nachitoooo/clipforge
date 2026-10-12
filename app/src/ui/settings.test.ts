@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MicStatus, Settings } from "../lib/settings";
 import { defaultSettings } from "../lib/settings";
+import type { MemoryPlans } from "../lib/settings";
 
 // ---- a fake backend ---------------------------------------------------------
 
@@ -23,6 +24,7 @@ const healthy: MicStatus = {
 
 const api = vi.hoisted(() => ({
   getSettings: vi.fn(),
+  memoryPlans: vi.fn(),
   updateSettings: vi.fn(),
   listMicrophones: vi.fn(),
   microphoneStatus: vi.fn(),
@@ -53,9 +55,20 @@ let createSettings: SettingsModule["createSettings"];
  * listening can't answer the next test's key presses. */
 const mounted: { onHide(): void }[] = [];
 
-async function mount(initial: Settings = defaultSettings(), status: MicStatus = healthy) {
+const PLANS: MemoryPlans = {
+  normal: { bufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 180_000_000 },
+  lowRam: { bufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 45_000_000 },
+};
+
+async function mount(
+  initial: Settings = defaultSettings(),
+  status: MicStatus = healthy,
+  plans: MemoryPlans | null = PLANS,
+) {
   document.body.innerHTML = '<div id="toasts"></div><section id="root"></section>';
   api.getSettings.mockResolvedValue(initial);
+  if (plans) api.memoryPlans.mockResolvedValue(plans);
+  else api.memoryPlans.mockRejectedValue("no");
   api.microphoneStatus.mockResolvedValue(status);
   const view = createSettings(document.getElementById("root")!);
   mounted.push(view);
@@ -806,6 +819,109 @@ describe("the screenshot shortcut", () => {
     keydown({ code: "F7", key: "F7" });
     await settle();
     expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("low RAM mode", () => {
+  const lowRamSwitch = () => q<HTMLInputElement>('input[aria-label="Modo poca memoria (RAM)"]');
+  const panel = () => q<HTMLElement>('[aria-labelledby="performance-title"]');
+  const dialog = () => document.querySelector<HTMLElement>(".dialog");
+  const dialogButton = (text: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>(".dialog .btn")].find(
+      (b) => b.textContent === text,
+    )!;
+  const flip = (checked: boolean) => {
+    lowRamSwitch().checked = checked;
+    lowRamSwitch().dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const withLowRam = (lowRam: boolean): Settings => ({
+    ...defaultSettings(),
+    performance: { lowRam },
+  });
+
+  it("is off by default and says what each mode costs, with the real numbers", async () => {
+    await mount();
+    expect(lowRamSwitch().checked).toBe(false);
+    const text = panel().textContent;
+    expect(text).toContain("Ahora: 2 min de buffer a 12 Mb/s (unos 180 MB de RAM)");
+    expect(text).toContain("Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM)");
+    expect(text).toContain("clips de hasta 1 min");
+    expect(text).toContain("reinicia la grabación y vacía el buffer");
+  });
+
+  it("asks before it changes anything, because it empties the buffer", async () => {
+    await mount();
+    flip(true);
+    await settle();
+    expect(dialog()!.textContent).toContain("el buffer actual se vacía");
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("saves it once confirmed, and nothing else changes", async () => {
+    await mount();
+    flip(true);
+    await settle();
+    dialogButton("Reiniciar la grabación").click();
+    await settle();
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    const saved = lastSaved();
+    expect(saved.performance).toEqual({ lowRam: true });
+    expect(saved.microphone).toEqual(defaultSettings().microphone);
+    expect(saved.shortcuts).toEqual(defaultSettings().shortcuts);
+    expect(saved.library).toEqual(defaultSettings().library);
+    expect(q("#toasts").textContent).toContain("Modo poca memoria activado");
+  });
+
+  it("leaves it as it was when the question is cancelled", async () => {
+    await mount();
+    flip(true);
+    await settle();
+    dialogButton("Cancelar").click();
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(lowRamSwitch().checked).toBe(false);
+  });
+
+  it("when it is on, says so, and asks again to go back", async () => {
+    await mount(withLowRam(true));
+    expect(lowRamSwitch().checked).toBe(true);
+    expect(panel().textContent).toContain(
+      "Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM) en vez de 2 min de buffer a 12 Mb/s",
+    );
+    flip(false);
+    await settle();
+    expect(dialog()!.textContent).toContain("Volver al modo normal");
+    dialogButton("Reiniciar la grabación").click();
+    await settle();
+    expect(lastSaved().performance.lowRam).toBe(false);
+    expect(q("#toasts").textContent).toContain("Modo normal");
+  });
+
+  it("a cancelled step back keeps it on", async () => {
+    await mount(withLowRam(true));
+    flip(false);
+    await settle();
+    dialogButton("Cancelar").click();
+    await settle();
+    expect(lowRamSwitch().checked).toBe(true);
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("follows a change made elsewhere", async () => {
+    await mount();
+    listeners.settings.forEach((cb) => cb(withLowRam(true)));
+    await settle();
+    expect(lowRamSwitch().checked).toBe(true);
+  });
+
+  it("still works when the numbers could not be fetched", async () => {
+    await mount(defaultSettings(), healthy, null);
+    expect(panel().textContent).toContain("ocupar bastante menos RAM");
+    flip(true);
+    await settle();
+    dialogButton("Reiniciar la grabación").click();
+    await settle();
+    expect(lastSaved().performance.lowRam).toBe(true);
   });
 });
 

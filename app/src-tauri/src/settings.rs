@@ -151,6 +151,16 @@ impl Default for LibrarySettings {
     }
 }
 
+/// How much the app may take from the computer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PerformanceSettings {
+    /// Keep one minute of video at half the bitrate instead of two minutes, so
+    /// the replay buffer takes a quarter of the memory (see `memory.rs`). Off by
+    /// default. Changing it restarts the video capture and empties the buffer.
+    pub low_ram: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -158,6 +168,7 @@ pub struct Settings {
     pub shortcuts: ShortcutSettings,
     pub microphone: MicrophoneSettings,
     pub library: LibrarySettings,
+    pub performance: PerformanceSettings,
 }
 
 impl Default for Settings {
@@ -167,6 +178,7 @@ impl Default for Settings {
             shortcuts: ShortcutSettings::default(),
             microphone: MicrophoneSettings::default(),
             library: LibrarySettings::default(),
+            performance: PerformanceSettings::default(),
         }
     }
 }
@@ -231,6 +243,13 @@ fn parse_shortcut(accelerator: &str) -> Result<Shortcut, String> {
 }
 
 impl Settings {
+    /// Whether going from `old` to `new` needs the video capture restarted — which
+    /// empties the replay buffer, so the UI warns before it happens. Everything
+    /// else is applied live.
+    pub fn needs_capture_restart(old: &Settings, new: &Settings) -> bool {
+        old.performance.low_ram != new.performance.low_ram
+    }
+
     /// Normalize and check a settings object coming from the UI (or a file).
     /// Every global shortcut must parse and no two features may share one.
     pub fn validated(mut self) -> Result<Self, String> {
@@ -1138,5 +1157,46 @@ mod tests {
             SettingsStore::load(dir.file()).get().shortcuts.screenshot,
             "F8"
         );
+    }
+
+    // ---- low RAM mode ----
+
+    #[test]
+    fn low_ram_is_off_until_chosen_and_old_files_do_not_have_it() {
+        assert!(!Settings::default().performance.low_ram);
+        let dir = TempDir::new("low-ram-old");
+        fs::write(dir.file(), r#"{"microphone":{"enabled":true}}"#).unwrap();
+        assert!(!SettingsStore::load(dir.file()).get().performance.low_ram);
+    }
+
+    #[test]
+    fn low_ram_survives_a_restart_and_is_camel_case() {
+        let dir = TempDir::new("low-ram-on");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.performance.low_ram = true;
+        store.replace(s.validated().unwrap()).unwrap();
+        assert!(SettingsStore::load(dir.file()).get().performance.low_ram);
+        let json = serde_json::to_value(SettingsStore::load(dir.file()).get()).unwrap();
+        assert_eq!(json["performance"]["lowRam"], true);
+    }
+
+    #[test]
+    fn only_a_change_of_memory_mode_restarts_the_capture() {
+        let off = Settings::default();
+        let mut on = off.clone();
+        on.performance.low_ram = true;
+        assert!(Settings::needs_capture_restart(&off, &on));
+        assert!(Settings::needs_capture_restart(&on, &off));
+        assert!(!Settings::needs_capture_restart(&on, &on));
+
+        // Nothing else asks for one.
+        let mut other = off.clone();
+        other.microphone.enabled = true;
+        other.microphone.gain_percent = 150;
+        other.shortcuts.clip_seconds = 60;
+        other.shortcuts.screenshot = "F8".into();
+        other.library.auto_folders = true;
+        assert!(!Settings::needs_capture_restart(&off, &other));
     }
 }

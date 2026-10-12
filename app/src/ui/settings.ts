@@ -13,25 +13,30 @@ import {
   defaultSettings,
   formatClipLength,
   formatGain,
+  memoryModeText,
   micStateSummary,
   shortcutOwners,
   withAddedShortcut,
   withExtraShortcut,
   withMicrophone,
   withLibrary,
+  withPerformance,
   withShortcuts,
   withoutExtraShortcut,
   type LibrarySettings,
+  type MemoryPlans,
   type MicDevice,
   type MicMode,
   type MicStatus,
   type MicrophoneSettings,
+  type PerformanceSettings,
   type Settings,
   type ShortcutSettings,
 } from "../lib/settings";
 import { h, svg } from "./dom";
 import { icons } from "./icons";
 import { createShortcutRecorder, type ShortcutRecorder } from "./shortcut";
+import { confirmDialog } from "./modal";
 import { switchControl } from "./switch";
 import { toast } from "./toast";
 
@@ -395,6 +400,52 @@ export function createSettings(root: HTMLElement): SettingsView {
     ),
   );
 
+  // ---- performance panel --------------------------------------------------
+
+  let plans: MemoryPlans | null = null;
+  const lowRamSwitch = switchControl("Modo poca memoria (RAM)", (checked) => void askLowRam(checked));
+  const lowRamRow = liveRow("Modo poca memoria (RAM)", lowRamSwitch.el);
+  const lowRamWarning = h(
+    "p",
+    { class: "row-hint muted" },
+    "Cambiarlo reinicia la grabación y vacía el buffer: lo que se grabó hasta ese momento se pierde. Los clips ya guardados no cambian.",
+  );
+  const performancePanel = h(
+    "section",
+    { class: "panel", "aria-labelledby": "performance-title" },
+    h(
+      "div",
+      { class: "panel-head" },
+      h(
+        "div",
+        { class: "panel-title" },
+        svg(icons.bolt),
+        h("h2", { id: "performance-title" }, "Rendimiento"),
+      ),
+    ),
+    h("div", { class: "panel-body" }, lowRamRow.el, lowRamWarning),
+  );
+
+  /** Switching it restarts the capture and empties the buffer: ask first. */
+  async function askLowRam(checked: boolean): Promise<void> {
+    const ok = await confirmDialog({
+      title: checked ? "Activar el modo poca memoria" : "Volver al modo normal",
+      message:
+        "Se reinicia la grabación y el buffer actual se vacía: lo que grabaste en los últimos minutos se pierde. Los clips ya guardados no cambian.",
+      confirmLabel: "Reiniciar la grabación",
+    });
+    if (ok) {
+      changePerformance({ lowRam: checked });
+      toast(
+        checked
+          ? "Modo poca memoria activado: la grabación se reinicia"
+          : "Modo normal: la grabación se reinicia",
+      );
+    } else {
+      lowRamSwitch.input.checked = settings.performance.lowRam; // as it was
+    }
+  }
+
   const optionsBody = h(
     "div",
     { class: "panel-body" },
@@ -461,7 +512,7 @@ export function createSettings(root: HTMLElement): SettingsView {
       { class: "view-header" },
       h("div", {}, h("h1", {}, "Configuración"), h("p", { class: "muted" }, "Cambios con efecto inmediato")),
     ),
-    h("div", { class: "view-body" }, h("div", { class: "settings" }, shortcutsPanel, panel, libraryPanel)),
+    h("div", { class: "view-body" }, h("div", { class: "settings" }, shortcutsPanel, panel, libraryPanel, performancePanel)),
   );
 
   // ---- rendering from state --------------------------------------------
@@ -543,6 +594,8 @@ export function createSettings(root: HTMLElement): SettingsView {
     clearScreenshot.hidden = settings.shortcuts.screenshot === "";
     resetSaveShortcut.hidden = settings.shortcuts.saveClip === DEFAULT_SAVE_SHORTCUT;
     detectSwitch.input.checked = settings.library.detectGame;
+    lowRamSwitch.input.checked = settings.performance.lowRam;
+    lowRamRow.hint.textContent = memoryModeText(plans, settings.performance.lowRam);
     autoFoldersSwitch.input.checked = settings.library.autoFolders;
     autoFoldersSwitch.input.disabled = !settings.library.detectGame;
     autoFoldersRow.hint.textContent =
@@ -564,6 +617,10 @@ export function createSettings(root: HTMLElement): SettingsView {
 
   function changeShortcuts(patch: Partial<ShortcutSettings>): void {
     update(withShortcuts(settings, patch), false);
+  }
+
+  function changePerformance(patch: Partial<PerformanceSettings>): void {
+    update(withPerformance(settings, patch), false);
   }
 
   function changeLibrary(patch: Partial<LibrarySettings>): void {
@@ -633,7 +690,11 @@ export function createSettings(root: HTMLElement): SettingsView {
 
   async function load(): Promise<void> {
     try {
-      [settings, status] = await Promise.all([api.getSettings(), api.microphoneStatus()]);
+      [settings, status, plans] = await Promise.all([
+        api.getSettings(),
+        api.microphoneStatus(),
+        api.memoryPlans().catch(() => null),
+      ]);
       lastSaved = settings;
     } catch (e) {
       toast(String(e), "error");

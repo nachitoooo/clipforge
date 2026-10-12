@@ -7,8 +7,11 @@ import {
   clipLengthOptions,
   defaultSettings,
   formatClipLength,
+  formatBitrate,
   formatGain,
+  formatMemory,
   gainToDb,
+  memoryModeText,
   micStateSummary,
   shortcutOwners,
   withAddedShortcut,
@@ -16,7 +19,9 @@ import {
   withLibrary,
   withMicrophone,
   withShortcuts,
+  withPerformance,
   withoutExtraShortcut,
+  type MemoryPlans,
   type MicStatus,
 } from "./settings";
 
@@ -219,5 +224,47 @@ describe("the screenshot shortcut", () => {
     });
     // The one being recorded may keep its own keys.
     expect(shortcutOwners(chosen, "screenshot").map((o) => o.accelerator)).not.toContain("F8");
+  });
+});
+
+describe("low RAM mode", () => {
+  const plans: MemoryPlans = {
+    normal: { bufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 180_000_000 },
+    lowRam: { bufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 45_000_000 },
+  };
+
+  it("is off by default", () => {
+    expect(defaultSettings().performance.lowRam).toBe(false);
+  });
+
+  it("patches only the performance section", () => {
+    const original = defaultSettings();
+    const next = withPerformance(original, { lowRam: true });
+    expect(next.performance.lowRam).toBe(true);
+    expect(next.microphone).toBe(original.microphone);
+    expect(next.library).toBe(original.library);
+    expect(original.performance.lowRam).toBe(false);
+  });
+
+  it("writes memory and bitrate the way people read them", () => {
+    expect(formatMemory(180_000_000)).toBe("180 MB");
+    expect(formatMemory(44_600_000)).toBe("45 MB");
+    expect(formatBitrate(12_000_000)).toBe("12 Mb/s");
+    expect(formatBitrate(7_500_000)).toBe("7,5 Mb/s");
+  });
+
+  it("describes the mode that is on and the other one", () => {
+    const off = memoryModeText(plans, false);
+    expect(off).toBe(
+      "Ahora: 2 min de buffer a 12 Mb/s (unos 180 MB de RAM). Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM), con clips de hasta 1 min y la imagen un poco más blanda en escenas rápidas.",
+    );
+    const on = memoryModeText(plans, true);
+    expect(on.startsWith("Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM) en vez de 2 min")).toBe(true);
+    expect(on).toContain("Los clips duran hasta 1 min, aunque pidas más");
+  });
+
+  it("has words even without the numbers", () => {
+    expect(memoryModeText(null, false)).toContain("menos RAM");
+    expect(memoryModeText(null, true)).toContain("menos RAM");
   });
 });

@@ -20,6 +20,7 @@ use clipforge_core::clip::{ClipService, SavedClip};
 use clipforge_core::engine::CaptureEngine;
 use serde::Serialize;
 
+use crate::memory::{self, MemoryPlan};
 use crate::mic::{
     gain_from_percent, plan, status as mic_status_from, AppliedMic, MicAction, MicDevice, MicFacts,
     MicStatus,
@@ -123,6 +124,24 @@ impl Recorder {
         self.clips.clips_dir().to_path_buf()
     }
 
+    /// How much RAM the buffer may take under the current settings.
+    pub fn memory_plan(&self) -> MemoryPlan {
+        memory::plan(self.settings.get().performance.low_ram)
+    }
+
+    /// Size the replay buffer for the current memory mode. Called as the capture
+    /// starts: the bitrate and the length are fixed for the whole run.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    fn apply_memory_plan(&self) -> MemoryPlan {
+        let plan = self.memory_plan();
+        let buffer = self.engine.lock().expect("engine lock").buffer();
+        buffer
+            .lock()
+            .expect("replay buffer lock")
+            .set_config(plan.buffer_config());
+        plan
+    }
+
     /// Start the replay buffer (real capture + hardware encoder).
     #[cfg(target_os = "macos")]
     pub fn start(&self) -> Result<(), String> {
@@ -143,7 +162,11 @@ impl Recorder {
                 }
             };
 
-        let config = EncoderConfig::default(); // documented 1080p60 defaults
+        let plan = self.apply_memory_plan();
+        let config = EncoderConfig {
+            bitrate: plan.bitrate,
+            ..EncoderConfig::default() // documented 1080p60 defaults
+        };
         let source = ScreenCaptureKitSource::new(ScreenCaptureConfig {
             width: Some(config.width),
             height: Some(config.height),
@@ -189,9 +212,11 @@ impl Recorder {
         let (screen_w, screen_h) = primary_display_size().map_err(|e| e.to_string())?;
         let defaults = EncoderConfig::default();
         let (width, height) = fit_even(screen_w, screen_h, defaults.width, defaults.height);
+        let plan = self.apply_memory_plan();
         let config = EncoderConfig {
             width,
             height,
+            bitrate: plan.bitrate,
             ..defaults
         };
 
@@ -609,5 +634,59 @@ mod tests {
         recorder.mic_controls.level.record(&[0.4, -0.7]);
         assert_eq!(recorder.take_mic_peak(), 0.7);
         assert_eq!(recorder.take_mic_peak(), 0.0);
+    }
+
+    // ---- low RAM mode ----
+
+    fn low_ram_settings() -> Settings {
+        let mut s = Settings::default();
+        s.performance.low_ram = true;
+        s
+    }
+
+    #[test]
+    fn the_memory_plan_follows_the_setting() {
+        assert_eq!(recorder().memory_plan(), memory::NORMAL);
+        assert_eq!(
+            recorder_with(low_ram_settings()).memory_plan(),
+            memory::LOW_RAM
+        );
+    }
+
+    fn buffer_config(recorder: &Recorder) -> clipforge_core::buffer::BufferConfig {
+        let buffer = recorder.engine.lock().unwrap().buffer();
+        let config = buffer.lock().unwrap().config().clone();
+        config
+    }
+
+    #[test]
+    fn starting_sizes_the_replay_buffer_for_the_mode() {
+        let normal = recorder();
+        normal.apply_memory_plan();
+        assert_eq!(
+            buffer_config(&normal).max_duration,
+            Duration::from_secs(120)
+        );
+
+        let low = recorder_with(low_ram_settings());
+        let plan = low.apply_memory_plan();
+        assert_eq!(plan, memory::LOW_RAM);
+        let config = buffer_config(&low);
+        assert_eq!(config.max_duration, Duration::from_secs(60));
+        assert_eq!(config.max_bytes, 96 * 1024 * 1024);
+    }
+
+    #[test]
+    fn turning_the_mode_off_again_gives_the_full_buffer_back() {
+        let recorder = recorder_with(low_ram_settings());
+        recorder.apply_memory_plan();
+        let mut back = Settings::default();
+        back.performance.low_ram = false;
+        recorder.settings.replace(back).unwrap();
+        recorder.apply_memory_plan();
+        assert_eq!(
+            buffer_config(&recorder).max_duration,
+            Duration::from_secs(120)
+        );
     }
 }

@@ -36,6 +36,8 @@ say how to get past that.
 - **Screenshots** of the screen (a hotkey you choose, the tray or a button), kept in
   the same library as the clips. macOS for now.
 - **Copy** a clip or a screenshot to paste it in Discord, Mail and so on.
+- **Low RAM mode** (Settings → Rendimiento): one minute of buffer at half the
+  bitrate, about a quarter of the memory.
 - Lives in the tray; nothing is ever uploaded anywhere.
 
 ## Status

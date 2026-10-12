@@ -106,6 +106,17 @@ app settings.
 - [ ] Windows: not implemented (needs one frame of Graphics Capture, F-2.4)
 - [ ] Not yet: choosing the monitor (it is the first display, like the replay buffer), a region, an editor for pictures, folder counts that say «capturas» (they still say «clips»)
 
+## F-3.14 — Low RAM mode
+> **Progress (2026-10-12):** implemented. Settings → Rendimiento → «Modo poca
+> memoria (RAM)»: the replay buffer keeps one minute at 6 Mb/s instead of two
+> minutes at 12 Mb/s, about 45 MB instead of 180 MB. The UI box stays open until
+> it is checked in the running app (and the real RAM measured under a game).
+- [x] `memory.rs`: the two modes as plain numbers (length, byte cap, bitrate), the normal one equal to the engine's defaults, an estimate of what a full buffer weighs; `ReplayBuffer::set_config` resizes a buffer (a smaller window drops whole GOPs at once)
+- [x] `settings.performance.lowRam` (off by default, old files get it off); applied when the capture starts on macOS and on Windows (bitrate and buffer); changing it restarts the video capture and empties the buffer, only if the buffer is running
+- [x] Settings: a panel with the switch, the real numbers of both modes (asked to the backend, so there is one source of truth), and a confirmation before anything changes — cancel leaves it as it was
+- [ ] Manual check in the app: switch it on and off, see the restart, watch the memory in Activity Monitor / Task Manager while recording (this was only estimated from the code: ~350–500 MB in total at 1080p60 normal)
+- [ ] Not yet: a free choice of buffer length and quality (the wave 1 settings), and a bitrate that adapts to the screen size
+
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented
 > and verified by tests (see below). Open boxes are things only a person at the

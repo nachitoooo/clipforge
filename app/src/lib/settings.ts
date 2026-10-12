@@ -42,11 +42,35 @@ export interface LibrarySettings {
   autoFolders: boolean;
 }
 
+export interface PerformanceSettings {
+  /**
+   * One minute of video at half the bitrate instead of two minutes: the replay
+   * buffer takes a quarter of the memory. Changing it restarts the capture and
+   * empties the buffer.
+   */
+  lowRam: boolean;
+}
+
 export interface Settings {
   version: number;
   shortcuts: ShortcutSettings;
   microphone: MicrophoneSettings;
   library: LibrarySettings;
+  performance: PerformanceSettings;
+}
+
+/** What one memory mode costs; mirrors `memory::PlanInfo` in `src-tauri/src/memory.rs`. */
+export interface PlanInfo {
+  bufferSeconds: number;
+  /** Average video bitrate, bits per second. */
+  bitrate: number;
+  /** About how much a full buffer weighs, in bytes. */
+  estimatedBytes: number;
+}
+
+export interface MemoryPlans {
+  normal: PlanInfo;
+  lowRam: PlanInfo;
 }
 
 export interface MicStatus {
@@ -91,6 +115,7 @@ export function defaultSettings(): Settings {
       muteShortcut: DEFAULT_MUTE_SHORTCUT,
     },
     library: { detectGame: true, autoFolders: false },
+    performance: { lowRam: false },
   };
 }
 
@@ -204,6 +229,41 @@ export function shortcutOwners(
     owners.push({ accelerator: settings.shortcuts.screenshot, owner: "Captura de pantalla" });
   }
   return owners;
+}
+
+/** A copy of `settings` with the performance section patched. */
+export function withPerformance(
+  settings: Settings,
+  patch: Partial<PerformanceSettings>,
+): Settings {
+  return { ...settings, performance: { ...settings.performance, ...patch } };
+}
+
+/** `180 MB`, `45 MB` (decimal, rounded: it is an estimate). */
+export function formatMemory(bytes: number): string {
+  return `${Math.round(bytes / 1_000_000)} MB`;
+}
+
+/** `12 Mb/s`, `6 Mb/s`, `7,5 Mb/s`. */
+export function formatBitrate(bitsPerSecond: number): string {
+  const mbps = bitsPerSecond / 1_000_000;
+  const text = Number.isInteger(mbps) ? String(mbps) : mbps.toFixed(1).replace(".", ",");
+  return `${text} Mb/s`;
+}
+
+function describePlan(plan: PlanInfo): string {
+  return `${formatClipLength(plan.bufferSeconds)} de buffer a ${formatBitrate(plan.bitrate)} (unos ${formatMemory(plan.estimatedBytes)} de RAM)`;
+}
+
+/** What the low RAM switch does, in words, for the mode that is on now. */
+export function memoryModeText(plans: MemoryPlans | null, lowRam: boolean): string {
+  if (plans === null) {
+    return "Guarda menos tiempo de video y con menos calidad para ocupar bastante menos RAM.";
+  }
+  const { normal, lowRam: low } = plans;
+  return lowRam
+    ? `Activado: ${describePlan(low)} en vez de ${describePlan(normal)}. Los clips duran hasta ${formatClipLength(low.bufferSeconds)}, aunque pidas más, y la imagen es un poco más blanda en escenas rápidas.`
+    : `Ahora: ${describePlan(normal)}. Activado: ${describePlan(low)}, con clips de hasta ${formatClipLength(low.bufferSeconds)} y la imagen un poco más blanda en escenas rápidas.`;
 }
 
 /** A copy of `settings` with the library section patched. */

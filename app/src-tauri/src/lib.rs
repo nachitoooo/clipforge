@@ -3,6 +3,7 @@ mod dispatch;
 mod editor;
 mod folders;
 mod library;
+mod memory;
 mod mic;
 mod persist;
 mod recorder;
@@ -162,6 +163,24 @@ fn file_name_of(path: &std::path::Path) -> String {
 
 /// A screenshot is tagged with the application in front over this many seconds.
 const SCREENSHOT_GAME_LOOKBACK_SECONDS: u64 = 5;
+
+/// Start the video capture over, off the calling thread, so a change that is
+/// fixed at start (the memory mode) takes effect. The buffer is emptied. Does
+/// nothing when the buffer was stopped on purpose: it will start with the new
+/// setting next time.
+fn restart_capture_in_background(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let actions = AppActions { app };
+        if !actions.buffer_running() {
+            return;
+        }
+        actions.stop_buffer();
+        if let Err(e) = actions.start_buffer() {
+            actions.notify("ClipForge — no se pudo reiniciar la captura", &e);
+        }
+    });
+}
 
 /// Apply the microphone settings off the calling thread (opening a device can
 /// block on the permission prompt) and tell the UI how it went.
@@ -579,6 +598,12 @@ async fn trim_clip(
     Ok(result)
 }
 
+/// What each memory mode costs, for the settings screen.
+#[tauri::command]
+fn memory_plans() -> memory::Plans {
+    memory::plans()
+}
+
 #[tauri::command]
 fn get_settings(store: tauri::State<'_, Arc<SettingsStore>>) -> Settings {
     store.get()
@@ -607,7 +632,11 @@ fn update_settings(
     }
     app.emit("settings-changed", &saved).ok();
     app.state::<Recorder>().apply_live_controls();
-    apply_microphone_in_background(&app);
+    if Settings::needs_capture_restart(&previous, &saved) {
+        restart_capture_in_background(&app);
+    } else {
+        apply_microphone_in_background(&app);
+    }
     Ok(saved)
 }
 
@@ -687,6 +716,7 @@ pub fn run() {
             clip_waveform,
             trim_clip,
             get_settings,
+            memory_plans,
             update_settings,
             list_microphones,
             microphone_status,
