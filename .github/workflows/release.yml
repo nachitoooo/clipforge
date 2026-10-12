@@ -104,9 +104,10 @@ jobs:
           TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
         run: |
           ls -l release-files
-          # A preview: the Windows build can't record yet (see the notes).
+          # Still a pre-release: unsigned, and Windows is tested in CI, not yet on a
+          # gaming PC (see the notes).
           gh release create "$TAG" release-files/* \
             --target "$GITHUB_SHA" \
-            --title "ClipForge $TAG (preview)" \
+            --title "ClipForge $TAG" \
             --notes-file .github/release-notes.md \
             --prerelease
