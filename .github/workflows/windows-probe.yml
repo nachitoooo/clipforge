@@ -20,7 +20,9 @@ jobs:
           "--- screens"
           Add-Type -AssemblyName System.Windows.Forms
           [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { "$($_.DeviceName) $($_.Bounds) primary=$($_.Primary)" }
+          exit 0
       - name: Media Foundation
+        if: always()
         shell: powershell
         run: |
           foreach ($f in "mf.dll","mfplat.dll","mfreadwrite.dll","mfh264enc.dll","mfaacenc.dll","mfcore.dll","msmpeg2enc.dll") {
@@ -30,6 +32,7 @@ jobs:
           "--- features"
           Get-WindowsFeature *Media* | Format-Table Name, InstallState -AutoSize
       - name: Graphics capture + audio
+        if: always()
         shell: powershell
         run: |
           try {
