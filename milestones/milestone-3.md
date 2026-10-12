@@ -77,6 +77,19 @@ app settings.
 - [ ] Manual check in the app with a real game: save with the hotkey, the tray and the button; the folder appears in the Biblioteca with its clip; delete it and save another
 - [ ] Not yet: file the clips that already exist (a one-time action)
 
+## F-3.12 — Copy a clip to the clipboard
+> **Progress (2026-10-12):** implemented. A clip is put on the system clipboard as
+> a *file*, so pasting in Discord, Slack, Mail, Messages or a folder takes it. No
+> server, nothing leaves the machine. The UI boxes stay open until someone checks
+> them in the running Tauri window.
+- [x] `core/src/clipboard/`: `copy_file(path)` — macOS `NSPasteboard` with the file's URL, Windows `CF_HDROP` (`DROPFILES` payload built by a pure, tested function); a relative path, a missing file or a folder is refused before the clipboard is touched
+  — verified 2026-10-12 against the real macOS pasteboard server (`macos_clipboard`, ignored tests, on a private pasteboard: the file comes back as a file URL, accents and spaces intact, a second copy replaces the first); the Windows code is compiled and linted by the CI cross-check, never run (F-2.4)
+- [x] `copy_clip` command (name checked with `library::clip_path`, off the UI thread); «Copiar» on every card (hover actions, now 28 px so seven fit the narrowest card) and in the player
+- [x] Size warning: after copying, if the clip doesn't fit Discord without Nitro (20 MB) or a mail (25 MB), the toast says so with the size and the limits (`lib/share.ts`, an editable table — the limits change; Discord's were read in its FAQ on 2026-10-12, the 25 MB of a mail is Gmail's usual limit, not re-checked)
+- [ ] Manual check: copy a clip from a card and from the player, paste it in Discord (desktop and web), Mail/Messages and a Finder folder
+- [ ] Windows: `CF_HDROP` never run (F-2.4)
+- [ ] Not yet: drag a clip out of the window into another app (needs a native drag session), "Exportar para Discord" (needs re-encoding, see the roadmap)
+
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented
 > and verified by tests (see below). Open boxes are things only a person at the

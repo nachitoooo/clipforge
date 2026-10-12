@@ -144,7 +144,7 @@ capture needs the "buffer will be emptied" warning.
 
 | Idea | Why | Effort | Notes |
 |---|---|---|---|
-| After saving: open folder / copy to clipboard / nothing | Paste the clip into chat in one step | S | Copy-file-to-clipboard differs per OS |
+| After saving: open folder / copy to clipboard / nothing | Paste the clip into chat in one step | S | Copying a clip is built (F-3.12, from its card and the player): this would run it automatically after a save, as a setting |
 | Start minimized to the tray | With launch at login, don't open the window | S | Goes with the autostart setting |
 | Configurable shortcuts for everything (open app, pause, mark) | One place for every shortcut | M | Generalizes the key recorder in `lib/hotkey.ts` |
 | Check for updates / beta channel | The app keeps itself current | M | Tauri updater; needs signing and hosting |

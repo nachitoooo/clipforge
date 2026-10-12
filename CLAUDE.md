@@ -73,6 +73,7 @@ hotkey saves the last N seconds as a clip.
 core/                  # clipforge-core crate
   src/
     activity/          # foreground-application lookup + log/tracker (the "game" of a clip)
+    clipboard/         # put a clip file on the system clipboard (NSPasteboard / CF_HDROP)
     capture/           # FrameSource/AudioSource traits + test_pattern.rs, macos/, windows/
     audio/             # AudioEncoder trait, ContinuityGuard, AAC encoders, WASAPI
     encode/            # Encoder trait + videotoolbox.rs, mediafoundation.rs

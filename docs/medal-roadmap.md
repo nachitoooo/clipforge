@@ -20,6 +20,8 @@ orden se decide al empezar cada uno.
 | Carpetas (un clip en varias) | F-3.9, `docs/library.md` |
 | **Biblioteca inteligente**: buscar, filtrar y ordenar; juego detectado | F-3.10 |
 | **Atajos con distinta duración**: la duración del atajo principal y hasta 4 atajos más | F-3.5 |
+| **Carpeta automática por juego** (ajuste, apagado de fábrica) | F-3.11 |
+| **Copiar el clip** al portapapeles como archivo, con aviso si no entra en Discord o un correo | F-3.12 |
 
 **Bloqueo transversal: F-2.4 (paridad Windows).** Hoy no existe captura ni
 codificador de Windows (`Recorder::start` devuelve un error fuera de macOS), así
@@ -33,7 +35,7 @@ exista".
 |---|---|---|---|---|---|
 | 0 | Biblioteca inteligente | **Hecha** | Seguimientos en el backlog | — | — |
 | 1 | Clips de cualquier duración | **Hecha** (hasta 4 atajos extra, duración propia) | Seguimientos abajo | — | — |
-| 2 | Comparte fácilmente | No | Copiar al portapapeles, aviso de tamaño | S–M | — |
+| 2 | Comparte fácilmente | **Hecha** (copiar el archivo, aviso de tamaño) | Arrastrar hacia afuera; «Exportar para Discord» (6) | M | — |
 | 3 | Captura de pantalla | No | Atajo que guarda un PNG | M | — (Windows: F-2.4) |
 | 4 | Biblioteca por juego / perfiles | Carpeta automática por juego **hecha** (4a) | Perfiles por juego (4b) | L | 0, 1 |
 | 5 | Marcadores | No | Atajo «Marcar momento» | M | — |
@@ -51,7 +53,7 @@ exista".
 0 Biblioteca inteligente (hecha)
 ├─ 1 Atajos con duración (hecha) ──────┐
 ├─ 4a Carpeta automática (hecha)       ├─ 4b Perfiles por juego
-├─ 2 Compartir sin servidor            │
+├─ 2 Compartir sin servidor (hecha)    │
 ├─ 3 Capturas de pantalla              │
 ├─ 5 Marcadores ───────────────────────┼─ 9 Grabación larga
 ├─ 6 Exportar… ─ (decisión) ───────────┘
@@ -112,38 +114,30 @@ una entrada de la bandeja por cada atajo extra.
 
 ---
 
-## 2. Compartir sin servidor
+## 2. Compartir sin servidor — hecha (F-3.12)
 
-**Qué es / por qué.** Medal genera un link. Sin servidor propio, lo más cercano
-es dejar el archivo listo para pegarlo en Discord, un chat o un mail.
+Medal genera un link; sin servidor propio lo más cercano es dejar el archivo
+listo para pegarlo. «Copiar» (en cada tarjeta y en el reproductor) pone el clip
+en el portapapeles **como archivo**, igual que «Copiar» del Finder o del
+Explorador: se pega en Discord, Slack, Mail, Mensajes o una carpeta.
 
-**Estado hoy.** La tarjeta tiene editar, renombrar, carpetas, mostrar el archivo y
-borrar; nada para sacar el clip de la app.
+Cómo quedó:
+* `core/src/clipboard/`: `copy_file(path)`. macOS: `NSPasteboard` con la URL del
+  archivo (`objc2-app-kit`); Windows: `CF_HDROP`, con el `DROPFILES` armado por
+  una función pura que se prueba en cualquier SO. Se verificó contra el
+  pasteboard real de macOS con tests ignorados (`macos_clipboard`) sobre un
+  pasteboard privado, sin pisar el portapapeles de nadie; Windows solo compila.
+* Comando `copy_clip(name)`, validado con `library::clip_path` y fuera del hilo
+  de la interfaz.
+* `lib/share.ts`: tabla de límites (**cambian**: los de Discord se leyeron en su
+  FAQ de archivos el 2026-10-12 — 20 MB sin Nitro, 50 MB Nitro Basic; los 25 MB de
+  un correo son el límite habitual de Gmail, sin volver a verificar) y el aviso
+  «pesa X y no entra en …». Copiar funciona igual: es un aviso, no un error.
 
-**Plan.**
-1. Comando `copy_clip_to_clipboard(name)` (valida con `library::clip_path`):
-   macOS, `NSPasteboard.generalPasteboard` con la URL del archivo
-   (`objc2-app-kit`, feature `NSPasteboard`); Windows, `CF_HDROP`
-   (`Win32_System_DataExchange`, `Win32_System_Memory`, `Win32_UI_Shell`).
-2. UI: acción «Copiar» en la tarjeta y el reproductor; aviso «Copiado, pegalo
-   en Discord».
-3. `lib/share.ts` (puro): si el clip pesa más que el límite de un destino, avisa
-   y propone «Exportar para Discord» (plan 6). Los límites **cambian**: verificar
-   los vigentes de Discord al implementar y dejarlos como tabla editable.
-4. Paso 2, aparte: arrastrar el clip desde la ventana hacia otra app. Arrastrar
-   hacia afuera desde un webview necesita una sesión de arrastre nativa
-   (`NSDraggingSession` / `DoDragDrop`); evaluar un plugin de Tauri antes de
-   escribirlo a mano.
-
-**Pruebas.** TS: tabla de límites. Rust: validación de nombre. macOS: test
-ignorado que copia y relee el pasteboard con AppKit (`pbpaste` no lee URLs de
-archivo). Windows: solo compilación.
-
-**Riesgos.** Pegar un archivo en Discord web depende del navegador; en la app de
-escritorio funciona. En Windows, la propiedad del handle del portapapeles es
-fácil de hacer mal (se detecta con una prueba real).
-
-**Esfuerzo:** S–M. **Depende de:** nada; se complementa con el plan 6.
+Falta: arrastrar el clip desde la ventana hacia otra app (necesita una sesión de
+arrastre nativa; evaluar un plugin de Tauri antes de escribirlo a mano),
+«Exportar para Discord» (necesita recodificar, plan 6), y probar el pegado en
+Discord web, que depende del navegador.
 
 ---
 
