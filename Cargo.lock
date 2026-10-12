@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "clipforge-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clipforge-core",
  "serde",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "clipforge-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "apple-cf",
  "bytes",

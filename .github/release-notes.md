@@ -4,6 +4,14 @@ Game highlight clips: a replay buffer records your screen and sound in the
 background, and a hotkey saves the last seconds (or minutes) as an `.mp4` you can
 trim, organize and share. Everything stays on your computer. The app is in Spanish.
 
+### New in 0.2.1
+
+- **Light or dark interface**, or the one your system uses, and a **main color** of
+  your choice (Settings → Apariencia).
+- **Low RAM mode** (Settings → Rendimiento): one minute of buffer at half the
+  bitrate, about 45 MB instead of 180 MB. Switching it restarts the recording.
+- A new look: the Inter typeface, drop-down filters for clips and flat buttons.
+
 ### Downloads
 
 | File | For | How |
@@ -40,4 +48,5 @@ the shortcut, the clip length, the microphone and more.
 
 Replay buffer · game sound and microphone · global hotkeys with their own clip
 lengths · lossless trim editor · library with folders, search, filters and game
-detection · screenshots · copy a clip to paste it in Discord or Mail.
+detection · screenshots · copy a clip to paste it in Discord or Mail · light and
+dark themes · low RAM mode.
