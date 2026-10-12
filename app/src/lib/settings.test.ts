@@ -202,3 +202,22 @@ describe("extra save shortcuts", () => {
     expect(accelerators(null)).toHaveLength(4);
   });
 });
+
+describe("the screenshot shortcut", () => {
+  it("is empty until one is chosen", () => {
+    expect(defaultSettings().shortcuts.screenshot).toBe("");
+  });
+
+  it("is one of the shortcuts in use once chosen, and not before", () => {
+    const none = shortcutOwners(defaultSettings());
+    expect(none.some((o) => o.owner === "Captura de pantalla")).toBe(false);
+
+    const chosen = withShortcuts(defaultSettings(), { screenshot: "F8" });
+    expect(shortcutOwners(chosen)).toContainEqual({
+      accelerator: "F8",
+      owner: "Captura de pantalla",
+    });
+    // The one being recorded may keep its own keys.
+    expect(shortcutOwners(chosen, "screenshot").map((o) => o.accelerator)).not.toContain("F8");
+  });
+});

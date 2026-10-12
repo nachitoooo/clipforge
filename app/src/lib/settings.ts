@@ -25,6 +25,8 @@ export interface ShortcutSettings {
   clipSeconds: number;
   /** More save shortcuts, each with its own length. */
   extraSaveClip: ClipShortcut[];
+  /** Takes a screenshot; empty = no shortcut (the default). */
+  screenshot: string;
 }
 
 export interface LibrarySettings {
@@ -79,7 +81,7 @@ export const CLIP_LENGTH_CHOICES = [15, 30, 60, 120];
 export function defaultSettings(): Settings {
   return {
     version: 1,
-    shortcuts: { saveClip: DEFAULT_SAVE_SHORTCUT, clipSeconds: DEFAULT_CLIP_SECONDS, extraSaveClip: [] },
+    shortcuts: { saveClip: DEFAULT_SAVE_SHORTCUT, clipSeconds: DEFAULT_CLIP_SECONDS, extraSaveClip: [], screenshot: "" },
     microphone: {
       enabled: false,
       deviceId: null,
@@ -176,7 +178,7 @@ export function withoutExtraShortcut(settings: Settings, index: number): Setting
  */
 export function shortcutOwners(
   settings: Settings,
-  except: { extra: number } | "save" | "mute" | null = null,
+  except: { extra: number } | "save" | "mute" | "screenshot" | null = null,
 ): { accelerator: string; owner: string }[] {
   const owners: { accelerator: string; owner: string }[] = [];
   if (except !== "save") {
@@ -197,6 +199,9 @@ export function shortcutOwners(
       accelerator: settings.microphone.muteShortcut,
       owner: "Silenciar el micrófono",
     });
+  }
+  if (except !== "screenshot" && settings.shortcuts.screenshot !== "") {
+    owners.push({ accelerator: settings.shortcuts.screenshot, owner: "Captura de pantalla" });
   }
   return owners;
 }

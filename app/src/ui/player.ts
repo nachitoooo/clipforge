@@ -7,9 +7,14 @@ import { openEditor } from "./editor";
 import { openModal } from "./modal";
 import { copyClip } from "./share";
 
-/** Full-size playback of one clip. */
+/** Full-size playback of one clip, or the full picture of one screenshot. */
 export function openPlayer(clip: ClipInfo): void {
-  const video = h("video", { class: "player-video", src: clipSrc(clip), controls: true, autoplay: true });
+  const isShot = clip.kind === "screenshot";
+  const video = isShot
+    ? null
+    : h("video", { class: "player-video", src: clipSrc(clip), controls: true, autoplay: true });
+  const media: HTMLElement =
+    video ?? h("img", { class: "player-image", src: clipSrc(clip), alt: clipTitle(clip.name) });
   const closeButton = h(
     "button",
     { class: "icon-btn", title: "Cerrar", "aria-label": "Cerrar", onclick: () => close() },
@@ -34,31 +39,36 @@ export function openPlayer(clip: ClipInfo): void {
           "button",
           {
             class: "btn",
-            title: "Copiar el clip para pegarlo en un chat o un mail",
+            title: isShot
+              ? "Copiar la captura para pegarla en un chat o un mail"
+              : "Copiar el clip para pegarlo en un chat o un mail",
             onclick: () => void copyClip(clip),
           },
           svg(icons.copy),
           "Copiar",
         ),
-        h(
-          "button",
-          {
-            class: "btn",
-            title: "Recortar y editar este clip",
-            onclick: () => {
-              close();
-              openEditor(clip);
-            },
-          },
-          svg(icons.cut),
-          "Recortar",
-        ),
+        isShot
+          ? null
+          : h(
+              "button",
+              {
+                class: "btn",
+                title: "Recortar y editar este clip",
+                onclick: () => {
+                  close();
+                  openEditor(clip);
+                },
+              },
+              svg(icons.cut),
+              "Recortar",
+            ),
         closeButton,
       ),
     ),
-    video,
+    media,
   );
   const close = openModal(panel, () => {
+    if (!video) return;
     video.pause();
     video.removeAttribute("src");
     video.load(); // release the file handle

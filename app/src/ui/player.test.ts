@@ -12,6 +12,7 @@ vi.mock("./editor", () => editor);
 
 const clip: ClipInfo = {
   name: "clip-1.mp4",
+  kind: "clip",
   path: "/clips/clip-1.mp4",
   sizeBytes: 3 * 1024 * 1024,
   modifiedMs: 0,
@@ -50,6 +51,27 @@ describe("the player", () => {
     expect(api.copyClip).toHaveBeenCalledWith("clip-1.mp4");
     expect(document.getElementById("toasts")!.textContent).toContain("Copiado");
     expect(document.querySelector(".player"), "stays open to keep watching").not.toBeNull();
+  });
+
+  it("shows a screenshot as a picture, with nothing to trim", async () => {
+    api.copyClip.mockResolvedValue(undefined);
+    openPlayer({ ...clip, name: "captura-1.png", path: "/clips/captura-1.png", kind: "screenshot" });
+    const image = document.querySelector<HTMLImageElement>(".player img.player-image")!;
+    expect(image.getAttribute("src")).toBe("asset:///clips/captura-1.png");
+    expect(document.querySelector(".player video")).toBeNull();
+    expect(button("Recortar")).toBeUndefined();
+    expect(document.querySelector(".player-title strong")!.textContent).toBe("captura-1");
+
+    button("Copiar").click();
+    await settle();
+    expect(api.copyClip).toHaveBeenCalledWith("captura-1.png");
+  });
+
+  it("closes a screenshot without trying to release a video", () => {
+    openPlayer({ ...clip, name: "captura-1.png", kind: "screenshot" });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.querySelector(".player")).toBeNull();
   });
 
   it("still opens the editor from its own button", () => {

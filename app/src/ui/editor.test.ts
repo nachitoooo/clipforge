@@ -18,6 +18,7 @@ vi.mock("./toast", () => toasts);
 
 const clip: ClipInfo = {
   name: "clip-20261009-101500.mp4",
+  kind: "clip",
   path: "/clips/clip-20261009-101500.mp4",
   sizeBytes: 5_000_000,
   modifiedMs: 0,

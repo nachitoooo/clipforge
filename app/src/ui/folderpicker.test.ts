@@ -22,6 +22,7 @@ const folder = (id: string, name: string, clipCount = 0): FolderInfo => ({
 
 const clip = (folders: string[]): ClipInfo => ({
   name: "clip-1.mp4",
+  kind: "clip",
   path: "/clips/clip-1.mp4",
   sizeBytes: 1,
   modifiedMs: 0,

@@ -384,6 +384,11 @@ kbd {
   display: block;
 }
 
+.thumb-image {
+  object-fit: contain; /* the whole picture, not a crop of it */
+  background: #07080b;
+}
+
 .thumb-play {
   position: absolute;
   inset: 0;
@@ -556,6 +561,14 @@ kbd {
   width: 100%;
   min-height: 0;
   max-height: calc(100vh - 140px);
+  background: #000;
+}
+
+.player-image {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 140px);
+  object-fit: contain; /* a tall or wide picture is shown whole */
   background: #000;
 }
 

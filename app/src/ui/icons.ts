@@ -26,6 +26,7 @@ export const icons = {
   palette: `${open}<path d="M12 3a9 9 0 1 0 0 18c1.3 0 1.9-.9 1.5-1.9-.4-1 .3-2.1 1.4-2.1H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r=".9" fill="currentColor"/><circle cx="10" cy="7.5" r=".9" fill="currentColor"/><circle cx="14.5" cy="7.5" r=".9" fill="currentColor"/></svg>`,
   reveal: `${open}<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>`,
   copy: `${open}<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>`,
+  camera: `${open}<path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.4"/></svg>`,
   plus: `${open}<path d="M12 5v14M5 12h14"/></svg>`,
   search: `${open}<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>`,
   check: `${open}<path d="M5 12.5l4.5 4.5L19 7"/></svg>`,

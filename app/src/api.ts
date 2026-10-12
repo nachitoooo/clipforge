@@ -47,6 +47,8 @@ export const trimClip = (request: TrimRequest) => invoke<TrimResult>("trim_clip"
 export const bufferStatus = () => invoke<BufferStatus>("buffer_status");
 export const toggleBuffer = () => invoke<void>("toggle_buffer");
 export const saveClip = () => invoke<void>("save_clip");
+/** Save a picture of the screen next to the clips; the result arrives as a notification and a `clip-saved` event. */
+export const takeScreenshot = () => invoke<void>("take_screenshot");
 
 export const clipSrc = (clip: ClipInfo) => convertFileSrc(clip.path);
 

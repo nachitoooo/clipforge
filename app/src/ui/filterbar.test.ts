@@ -7,6 +7,7 @@ import { createFilterBar, type FilterBar } from "./filterbar";
 
 const clip = (name: string, game: string | null, folders: string[] = []): ClipInfo => ({
   name: `${name}.mp4`,
+  kind: "clip",
   path: `/clips/${name}.mp4`,
   sizeBytes: 1,
   modifiedMs: 0,
@@ -104,7 +105,7 @@ describe("the options it offers", () => {
 
 describe("changing the filter", () => {
   it("starts with nothing hidden and no clear button", () => {
-    expect(bar.get()).toEqual({ query: "", game: null, folder: null, range: "all", sort: "newest" });
+    expect(bar.get()).toEqual({ query: "", game: null, folder: null, range: "all", sort: "newest", kind: "all" });
     expect(clearButton().hidden).toBe(true);
   });
 
@@ -122,7 +123,7 @@ describe("changing the filter", () => {
     choose(select("Fecha"), "week");
     expect(last()?.range).toBe("week");
     choose(select("Ordenar por"), "size");
-    expect(last()).toEqual({ query: "", game: "valorant", folder: "f1", range: "week", sort: "size" });
+    expect(last()).toEqual({ query: "", game: "valorant", folder: "f1", range: "week", sort: "size", kind: "all" });
   });
 
   it("can pick the clips with no game or no folder", () => {
@@ -164,7 +165,7 @@ describe("clearing", () => {
     choose(select("Fecha"), "today");
     choose(select("Ordenar por"), "name");
     clearButton().click();
-    expect(last()).toEqual({ query: "", game: null, folder: null, range: "all", sort: "name" });
+    expect(last()).toEqual({ query: "", game: null, folder: null, range: "all", sort: "name", kind: "all" });
     expect(search().value).toBe("");
     expect(select("Juego").value).toBe("");
     expect(select("Fecha").value).toBe("all");
@@ -212,6 +213,57 @@ describe("new data", () => {
     type("ace");
     bar.setData({ clips, folders });
     expect(search().value).toBe("ace");
+  });
+});
+
+describe("clips and screenshots", () => {
+  const shots = [
+    { ...clip("foto-1", null), name: "foto-1.png", kind: "screenshot" as const },
+    { ...clip("foto-2", "Valorant"), name: "foto-2.png", kind: "screenshot" as const },
+  ];
+  const kindSelect = () => select("Tipo");
+
+  it("offers no type choice while there are only clips", () => {
+    expect(kindSelect().hidden).toBe(true);
+  });
+
+  it("offers it as soon as there is a screenshot", () => {
+    bar.setData({ clips: [...clips, ...shots], folders });
+    expect(kindSelect().hidden).toBe(false);
+    expect(labels(kindSelect())).toEqual(["Clips y capturas", "Solo clips", "Solo capturas"]);
+  });
+
+  it("filters by type and counts it as a filter", () => {
+    bar.setData({ clips: [...clips, ...shots], folders });
+    choose(kindSelect(), "screenshot");
+    expect(last().kind).toBe("screenshot");
+    expect(clearButton().hidden).toBe(false);
+    choose(kindSelect(), "all");
+    expect(last().kind).toBe("all");
+    expect(clearButton().hidden).toBe(true);
+  });
+
+  it("drops the type filter when the last screenshot is gone", () => {
+    bar.setData({ clips: [...clips, ...shots], folders });
+    choose(kindSelect(), "screenshot");
+    bar.setData({ clips, folders });
+    expect(bar.get().kind).toBe("all");
+    expect(kindSelect().hidden).toBe(true);
+  });
+
+  it("clearing the filters brings the screenshots back", () => {
+    bar.setData({ clips: [...clips, ...shots], folders });
+    choose(kindSelect(), "clip");
+    clearButton().click();
+    expect(last().kind).toBe("all");
+    expect(kindSelect().value).toBe("all");
+  });
+
+  it("counts 'elementos' when the list mixes both", () => {
+    bar.setData({ clips: [...clips, ...shots], folders });
+    choose(kindSelect(), "screenshot");
+    bar.setCount(2, 6);
+    expect(q(".filter-status").textContent).toBe("2 de 6 elementos");
   });
 });
 

@@ -1,10 +1,12 @@
-import type { ClipInfo } from "./clips";
+import type { ClipInfo, ClipKind } from "./clips";
 import { clipTitle } from "./clips";
 import type { FolderInfo } from "./folders";
 import { foldersOf } from "./folders";
 
 export type DateRange = "all" | "today" | "week" | "month" | "year";
 export type SortKey = "newest" | "oldest" | "name" | "size";
+/** Videos, pictures, or both. */
+export type KindFilter = "all" | ClipKind;
 
 /** The "no game" / "no folder" choice of the game and folder filters. */
 export const NONE = "__none__";
@@ -17,7 +19,15 @@ export interface ClipFilter {
   folder: string | null;
   range: DateRange;
   sort: SortKey;
+  /** Only clips, only screenshots, or everything. */
+  kind: KindFilter;
 }
+
+export const KIND_OPTIONS: readonly { id: KindFilter; label: string }[] = [
+  { id: "all", label: "Clips y capturas" },
+  { id: "clip", label: "Solo clips" },
+  { id: "screenshot", label: "Solo capturas" },
+];
 
 export const RANGE_OPTIONS: readonly { id: DateRange; label: string }[] = [
   { id: "all", label: "Todo el tiempo" },
@@ -35,7 +45,7 @@ export const SORT_OPTIONS: readonly { id: SortKey; label: string }[] = [
 ];
 
 export function emptyFilter(): ClipFilter {
-  return { query: "", game: null, folder: null, range: "all", sort: "newest" };
+  return { query: "", game: null, folder: null, range: "all", sort: "newest", kind: "all" };
 }
 
 /** True when the filter hides something. The sort order doesn't hide anything. */
@@ -44,7 +54,8 @@ export function isFiltering(filter: ClipFilter): boolean {
     filter.query.trim() !== "" ||
     filter.game !== null ||
     filter.folder !== null ||
-    filter.range !== "all"
+    filter.range !== "all" ||
+    filter.kind !== "all"
   );
 }
 
@@ -160,6 +171,7 @@ export function applyFilter(
 
   const passes = (clip: ClipInfo): boolean => {
     if (from !== null && clip.modifiedMs < from) return false;
+    if (filter.kind !== "all" && clip.kind !== filter.kind) return false;
     if (filter.game !== null) {
       const wanted = filter.game === NONE ? clip.game === null : clip.game !== null && gameKey(clip.game) === filter.game;
       if (!wanted) return false;

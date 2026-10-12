@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   deleteClip: vi.fn(),
   revealClip: vi.fn(),
   copyClip: vi.fn(),
+  takeScreenshot: vi.fn(),
   clipSrc: vi.fn((clip: { path: string }) => `asset://${clip.path}`),
 }));
 vi.mock("../api", () => api);
@@ -25,6 +26,7 @@ vi.mock("./gamedialog", () => gameDialog);
 
 const clip = (n: number): ClipInfo => ({
   name: `clip-${n}.mp4`,
+  kind: "clip",
   path: `/clips/clip-${n}.mp4`,
   sizeBytes: 1000 * n,
   modifiedMs: Date.now() - n * 1000,
@@ -61,6 +63,7 @@ beforeEach(async () => {
   picker.openFolderPicker.mockReset();
   gameDialog.openGameDialog.mockReset();
   vi.resetModules();
+  vi.mocked((await import("./player")).openPlayer).mockClear();
   ({ createGallery } = (await import("./gallery")) as GalleryModule);
 });
 
@@ -151,6 +154,105 @@ describe("the save-clip shortcut shown in the gallery", () => {
     await gallery.refresh();
     expect(headerKey()).toBe("⌥F9");
     await settle();
+  });
+});
+
+describe("screenshots", () => {
+  const shot = (n: number, extra: Partial<ClipInfo> = {}): ClipInfo => ({
+    ...clip(n),
+    name: `captura-${n}.png`,
+    kind: "screenshot",
+    path: `/clips/captura-${n}.png`,
+    ...extra,
+  });
+  const labelsOf = (card: Element) =>
+    [...card.querySelectorAll<HTMLElement>(".card-actions button")].map((b) => b.getAttribute("aria-label"));
+
+  async function show(...items: ClipInfo[]) {
+    api.listClips.mockResolvedValue(items);
+    const gallery = createGallery(root());
+    await gallery.refresh();
+    return [...root().querySelectorAll<HTMLElement>(".card")];
+  }
+
+  it("take a picture from the button in the header", async () => {
+    await show();
+    const button = [...root().querySelectorAll<HTMLButtonElement>(".view-header .btn")].find(
+      (b) => b.textContent?.includes("Captura"),
+    )!;
+    button.click();
+    expect(api.takeScreenshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("are shown as the picture itself, not as a video", async () => {
+    const [card] = await show(shot(1));
+    const image = card.querySelector<HTMLImageElement>("img.thumb-image")!;
+    expect(image.getAttribute("src")).toBe("asset:///clips/captura-1.png");
+    expect(card.querySelector("video")).toBeNull();
+    expect(card.querySelector(".thumb-play")).toBeNull();
+    expect(card.querySelector(".card-title")!.textContent).toBe("captura-1");
+  });
+
+  it("say their size once the picture has loaded", async () => {
+    const [card] = await show(shot(1));
+    expect(card.querySelector(".badge")!.textContent).toBe("PNG");
+    const image = card.querySelector<HTMLImageElement>("img")!;
+    Object.defineProperty(image, "naturalWidth", { value: 2940 });
+    Object.defineProperty(image, "naturalHeight", { value: 1912 });
+    image.dispatchEvent(new Event("load"));
+    expect(card.querySelector(".badge")!.textContent).toBe("2940×1912");
+  });
+
+  it("can't be trimmed, but can be renamed, filed, copied, shown and deleted", async () => {
+    const [picture, video] = await show(shot(1), clip(2));
+    expect(labelsOf(picture)).toEqual([
+      "Renombrar",
+      "Carpetas…",
+      "Copiar la captura para pegarla en un chat o un mail",
+      "Mostrar el archivo en el disco",
+      "Borrar",
+    ]);
+    expect(labelsOf(video)).toContain("Recortar y editar");
+  });
+
+  it("open in the viewer, not the editor", async () => {
+    const player = await import("./player");
+    const [picture] = await show(shot(1));
+    picture.click();
+    expect(player.openPlayer).toHaveBeenCalledWith(expect.objectContaining({ name: "captura-1.png" }));
+  });
+
+  it("copy the picture and say so", async () => {
+    api.copyClip.mockResolvedValue(undefined);
+    const [picture] = await show(shot(1));
+    picture
+      .querySelector<HTMLButtonElement>('[aria-label^="Copiar la captura"]')!
+      .click();
+    await settle();
+    expect(api.copyClip).toHaveBeenCalledWith("captura-1.png");
+    expect(document.getElementById("toasts")!.textContent).toContain("Copiado");
+  });
+
+  it("are counted next to the clips in the header", async () => {
+    await show(clip(1), clip(2), shot(3));
+    expect(root().querySelector(".view-header p")!.textContent).toBe("2 clips y 1 captura");
+  });
+
+  it("can be told apart with the type filter, which appears with the first one", async () => {
+    await show(clip(1));
+    expect(root().querySelector('select[aria-label="Tipo"]')).toSatisfy(
+      (el: HTMLElement | null) => el === null || el.hidden,
+    );
+    document.body.innerHTML = '<div id="toasts"></div><section id="root"></section>';
+    const cards = await show(clip(1), shot(2), shot(3));
+    expect(cards).toHaveLength(3);
+    const select = root().querySelector<HTMLSelectElement>('select[aria-label="Tipo"]')!;
+    expect(select.hidden).toBe(false);
+    select.value = "screenshot";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    const names = [...root().querySelectorAll(".card-title")].map((t) => t.textContent);
+    expect(names.sort()).toEqual(["captura-2", "captura-3"]);
+    expect(root().querySelector(".filter-status")!.textContent).toBe("2 de 3 elementos");
   });
 });
 

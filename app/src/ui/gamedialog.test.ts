@@ -7,6 +7,7 @@ vi.mock("../api", () => api);
 
 const clip = (game: string | null): ClipInfo => ({
   name: "clip-1.mp4",
+  kind: "clip",
   path: "/clips/clip-1.mp4",
   sizeBytes: 1,
   modifiedMs: 0,

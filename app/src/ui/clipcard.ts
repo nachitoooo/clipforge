@@ -77,7 +77,7 @@ export interface ClipCards {
  */
 export function createClipCards(options: ClipCardsOptions): ClipCards {
   let renaming = false;
-  const cache = new Map<string, { signature: string; el: HTMLElement; video: HTMLVideoElement }>();
+  const cache = new Map<string, { signature: string; el: HTMLElement; video: HTMLVideoElement | null }>();
 
   const lazyVideos = new IntersectionObserver(
     (entries) => {
@@ -171,7 +171,7 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
 
   function forget(name: string): void {
     const entry = cache.get(name);
-    if (entry) lazyVideos.unobserve(entry.video);
+    if (entry?.video) lazyVideos.unobserve(entry.video);
     cache.delete(name);
   }
 
@@ -179,6 +179,7 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
   function signature(clip: ClipInfo, draggable: boolean): string {
     return [
       clip.path,
+      clip.kind,
       clip.sizeBytes,
       clip.modifiedMs,
       clip.game ?? "",
@@ -205,25 +206,48 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
   function build(
     clip: ClipInfo,
     cardOptions: { draggable?: boolean },
-  ): { el: HTMLElement; video: HTMLVideoElement } {
-    const duration = h("span", { class: "badge" }, "–:––");
-    const video = h("video", {
-      class: "thumb-video",
-      preload: "metadata",
-      "data-src": api.clipSrc(clip),
-    });
-    video.muted = true;
-    video.loop = true;
-    video.playsInline = true;
-    video.addEventListener("loadedmetadata", () => {
-      duration.textContent = formatDuration(video.duration);
-      video.currentTime = Math.min(PREVIEW_FRAME, video.duration / 2);
-    });
-    lazyVideos.observe(video);
+  ): { el: HTMLElement; video: HTMLVideoElement | null } {
+    const isShot = clip.kind === "screenshot";
+    // A clip shows a paused frame (and plays on hover); a screenshot is the picture.
+    const badge = h("span", { class: "badge" }, isShot ? "PNG" : "–:––");
+    let video: HTMLVideoElement | null = null;
+    let media: HTMLElement;
+    if (isShot) {
+      const image = h("img", {
+        class: "thumb-video thumb-image",
+        src: api.clipSrc(clip),
+        alt: "",
+        loading: "lazy",
+        draggable: "false",
+      });
+      image.addEventListener("load", () => {
+        badge.textContent = `${image.naturalWidth}×${image.naturalHeight}`;
+      });
+      media = image;
+    } else {
+      const clipVideo = h("video", {
+        class: "thumb-video",
+        preload: "metadata",
+        "data-src": api.clipSrc(clip),
+      });
+      clipVideo.muted = true;
+      clipVideo.loop = true;
+      clipVideo.playsInline = true;
+      clipVideo.addEventListener("loadedmetadata", () => {
+        badge.textContent = formatDuration(clipVideo.duration);
+        clipVideo.currentTime = Math.min(PREVIEW_FRAME, clipVideo.duration / 2);
+      });
+      lazyVideos.observe(clipVideo);
+      video = clipVideo;
+      media = clipVideo;
+    }
 
     const title = h("div", { class: "card-title", title: clip.name }, clipTitle(clip.name));
     const actions: ClipAction[] = [
-      { label: "Recortar y editar", icon: icons.cut, onClick: () => openEditor(clip) },
+      // Only a video can be trimmed.
+      ...(isShot
+        ? []
+        : [{ label: "Recortar y editar", icon: icons.cut, onClick: () => openEditor(clip) }]),
       { label: "Renombrar", icon: icons.rename, onClick: () => startRename(title, clip) },
       {
         label: "Carpetas…",
@@ -232,7 +256,9 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
       },
       ...(options.extraActions?.(clip) ?? []),
       {
-        label: "Copiar el clip para pegarlo en un chat o un mail",
+        label: isShot
+          ? "Copiar la captura para pegarla en un chat o un mail"
+          : "Copiar el clip para pegarlo en un chat o un mail",
         icon: icons.copy,
         onClick: () => void copyClip(clip),
       },
@@ -255,9 +281,9 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
       h(
         "div",
         { class: "thumb" },
-        video,
-        h("div", { class: "thumb-play" }, svg(icons.play)),
-        duration,
+        media,
+        isShot ? null : h("div", { class: "thumb-play" }, svg(icons.play)),
+        badge,
         h("div", { class: "card-actions" }, ...actions.map(actionButton)),
       ),
       h(
@@ -289,11 +315,14 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
       ),
     );
 
-    el.addEventListener("mouseenter", () => void video.play().catch(() => {}));
-    el.addEventListener("mouseleave", () => {
-      video.pause();
-      video.currentTime = Math.min(PREVIEW_FRAME, video.duration / 2 || PREVIEW_FRAME);
-    });
+    if (video) {
+      const preview = video;
+      el.addEventListener("mouseenter", () => void preview.play().catch(() => {}));
+      el.addEventListener("mouseleave", () => {
+        preview.pause();
+        preview.currentTime = Math.min(PREVIEW_FRAME, preview.duration / 2 || PREVIEW_FRAME);
+      });
+    }
     el.addEventListener("click", () => openPlayer(clip));
     el.addEventListener("keydown", (e) => {
       if (e.target === el && (e.key === "Enter" || e.key === " ")) {

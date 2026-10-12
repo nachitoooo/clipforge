@@ -26,6 +26,7 @@ vi.mock("./gamedialog", () => ({ openGameDialog: vi.fn() }));
 
 const clip = (n: number, folders: string[] = []): ClipInfo => ({
   name: `clip-${n}.mp4`,
+  kind: "clip",
   path: `/clips/clip-${n}.mp4`,
   sizeBytes: 1_000_000 * n,
   modifiedMs: Date.now() - n * 1000,

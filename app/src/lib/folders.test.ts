@@ -29,6 +29,7 @@ const folder = (id: string, name: string, extra: Partial<FolderInfo> = {}): Fold
 
 const clip = (name: string, folders: string[] = []): ClipInfo => ({
   name,
+  kind: "clip",
   path: `/clips/${name}`,
   sizeBytes: 1,
   modifiedMs: 0,

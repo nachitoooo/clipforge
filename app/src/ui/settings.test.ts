@@ -733,6 +733,82 @@ describe("save shortcuts with their own length", () => {
   });
 });
 
+describe("the screenshot shortcut", () => {
+  const keydown = (init: KeyboardEventInit & { code: string }) =>
+    window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+  const button = () => q<HTMLButtonElement>('[data-shortcut="screenshot"]');
+  const clear = () => q<HTMLButtonElement>("[data-clear-screenshot]");
+  const note = () => q('[data-shortcut-note="screenshot"]');
+  const withScreenshot = (screenshot: string): Settings => {
+    const s = defaultSettings();
+    return { ...s, shortcuts: { ...s.shortcuts, screenshot } };
+  };
+
+  it("starts without one, and says how to take a picture anyway", async () => {
+    await mount();
+    expect(button().textContent).toBe("Sin atajo");
+    expect(clear().hidden).toBe(true);
+    expect(q('[aria-labelledby="shortcuts-title"]').textContent).toContain(
+      "desde la bandeja y desde el botón «Captura»",
+    );
+  });
+
+  it("records one and saves it without touching the others", async () => {
+    await mount();
+    button().click();
+    keydown({ code: "F8", key: "F8" });
+    await settle();
+    expect(lastSaved().shortcuts.screenshot).toBe("F8");
+    expect(lastSaved().shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
+    expect(lastSaved().shortcuts.extraSaveClip).toEqual([]);
+    expect(button().textContent).toBe("F8");
+    expect(clear().hidden).toBe(false);
+  });
+
+  it("refuses keys another shortcut already uses, naming it", async () => {
+    await mount();
+    button().click();
+    keydown({ code: "KeyS", key: "s", metaKey: true, shiftKey: true });
+    expect(note().textContent).toContain("Guardar clip (30 s)");
+    keydown({ code: "KeyM", key: "m", metaKey: true, shiftKey: true });
+    expect(note().textContent).toContain("Silenciar el micrófono");
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("the other shortcuts refuse its keys", async () => {
+    await mount(withScreenshot("F8"));
+    q<HTMLButtonElement>('[data-shortcut="save-clip"]').click();
+    keydown({ code: "F8", key: "F8" });
+    expect(q('[data-shortcut-note="save-clip"]').textContent).toContain("Captura de pantalla");
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("can be removed", async () => {
+    await mount(withScreenshot("F8"));
+    expect(button().textContent).toBe("F8");
+    clear().click();
+    await settle();
+    expect(lastSaved().shortcuts.screenshot).toBe("");
+    expect(button().textContent).toBe("Sin atajo");
+    expect(clear().hidden).toBe(true);
+  });
+
+  it("follows a change made elsewhere and stops recording when the screen is left", async () => {
+    const view = await mount();
+    listeners.settings.forEach((cb) => cb(withScreenshot("Alt+F8")));
+    await settle();
+    expect(button().textContent).toBe("⌥F8");
+
+    view.onShow();
+    button().click();
+    view.onHide();
+    keydown({ code: "F7", key: "F7" });
+    await settle();
+    expect(api.updateSettings).not.toHaveBeenCalled();
+  });
+});
+
 describe("the level meter", () => {
   it("only streams while the screen is open", async () => {
     const view = await mount(micSettings({ enabled: true }));

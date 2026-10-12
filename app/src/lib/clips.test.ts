@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clipTitle, dayLabel, groupByDay, type ClipInfo } from "./clips";
+import { clipTitle, dayLabel, groupByDay, mediaCountLabel, type ClipInfo } from "./clips";
 
 // Local-time constructors: the grouping is by *local* calendar day.
 const at = (y: number, m: number, d: number, h = 12, min = 0) =>
@@ -7,6 +7,7 @@ const at = (y: number, m: number, d: number, h = 12, min = 0) =>
 
 const clip = (name: string, modifiedMs: number): ClipInfo => ({
   name,
+  kind: "clip",
   path: `/clips/${name}`,
   sizeBytes: 1,
   modifiedMs,
@@ -20,6 +21,28 @@ describe("clipTitle", () => {
     expect(clipTitle("UPPER.MP4")).toBe("UPPER");
     expect(clipTitle("my.mp4.backup.mp4")).toBe("my.mp4.backup");
     expect(clipTitle("no-extension")).toBe("no-extension");
+  });
+});
+
+describe("screenshots", () => {
+  const shot = (name: string): ClipInfo => ({ ...clip(name, 1), kind: "screenshot" });
+
+  it("lose their png extension in the title, like a clip loses its mp4", () => {
+    expect(clipTitle("captura-20261012-153000.png")).toBe("captura-20261012-153000");
+    expect(clipTitle("UPPER.PNG")).toBe("UPPER");
+    expect(clipTitle("my.png.backup.png")).toBe("my.png.backup");
+    expect(clipTitle("photo.jpg")).toBe("photo.jpg");
+  });
+
+  it("say what a list holds", () => {
+    expect(mediaCountLabel([])).toBe("Sin clips");
+    expect(mediaCountLabel([clip("a.mp4", 1)])).toBe("1 clip");
+    expect(mediaCountLabel([clip("a.mp4", 1), clip("b.mp4", 1)])).toBe("2 clips");
+    expect(mediaCountLabel([shot("a.png")])).toBe("1 captura");
+    expect(mediaCountLabel([shot("a.png"), shot("b.png")])).toBe("2 capturas");
+    expect(mediaCountLabel([clip("a.mp4", 1), shot("a.png"), shot("b.png")])).toBe(
+      "1 clip y 2 capturas",
+    );
   });
 });
 

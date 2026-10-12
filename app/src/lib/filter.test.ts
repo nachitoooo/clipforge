@@ -20,6 +20,7 @@ const NOW = at(2026, 9, 11, 15); // Sunday 11 October 2026, 15:00
 
 const clip = (name: string, extra: Partial<ClipInfo> = {}): ClipInfo => ({
   name: `${name}.mp4`,
+  kind: "clip",
   path: `/clips/${name}.mp4`,
   sizeBytes: 1000,
   modifiedMs: NOW - 1000,
@@ -54,6 +55,42 @@ describe("isFiltering", () => {
     expect(isFiltering(filter({ game: NONE }))).toBe(true);
     expect(isFiltering(filter({ folder: "f1" }))).toBe(true);
     expect(isFiltering(filter({ range: "week" }))).toBe(true);
+    expect(isFiltering(filter({ kind: "screenshot" }))).toBe(true);
+    expect(isFiltering(filter({ kind: "clip" }))).toBe(true);
+    expect(isFiltering(filter({ kind: "all" }))).toBe(false);
+  });
+});
+
+describe("the type filter", () => {
+  const shot = (name: string, extra: Partial<ClipInfo> = {}) =>
+    clip(name, { name: `${name}.png`, kind: "screenshot", ...extra });
+  const mixed = [clip("video-a"), shot("foto-a"), clip("video-b"), shot("foto-b")];
+  const ids = (list: ClipInfo[]) => list.map((c) => c.name).sort();
+
+  it("shows clips and screenshots together by default", () => {
+    expect(emptyFilter().kind).toBe("all");
+    expect(applyFilter(mixed, [], emptyFilter(), NOW)).toHaveLength(4);
+  });
+
+  it("can show only one kind", () => {
+    expect(ids(applyFilter(mixed, [], filter({ kind: "clip" }), NOW))).toEqual([
+      "video-a.mp4",
+      "video-b.mp4",
+    ]);
+    expect(ids(applyFilter(mixed, [], filter({ kind: "screenshot" }), NOW))).toEqual([
+      "foto-a.png",
+      "foto-b.png",
+    ]);
+  });
+
+  it("combines with the rest, and a picture's title is searched without its extension", () => {
+    const result = applyFilter(mixed, [], filter({ kind: "screenshot", query: "foto-b" }), NOW);
+    expect(ids(result)).toEqual(["foto-b.png"]);
+    expect(applyFilter(mixed, [], filter({ kind: "screenshot", query: "png" }), NOW)).toEqual([]);
+    const withGame = [shot("a", { game: "Valorant" }), clip("b", { game: "Valorant" })];
+    expect(
+      ids(applyFilter(withGame, [], filter({ kind: "screenshot", game: "valorant" }), NOW)),
+    ).toEqual(["a.png"]);
   });
 });
 

@@ -1,6 +1,6 @@
 import * as api from "../api";
 import { bufferLabel, type BufferStatus } from "../lib/buffer";
-import { clipCountLabel, groupByDay, type ClipInfo } from "../lib/clips";
+import { groupByDay, mediaCountLabel, type ClipInfo } from "../lib/clips";
 import { applyFilter, layoutFor } from "../lib/filter";
 import type { FolderInfo } from "../lib/folders";
 import { displayAccelerator } from "../lib/hotkey";
@@ -86,7 +86,7 @@ export function createGallery(root: HTMLElement): Gallery {
         "div",
         {},
         h("h1", {}, "Clips recientes"),
-        h("p", { class: "muted" }, loaded ? clipCountLabel(clips.length) : "Cargando…"),
+        h("p", { class: "muted" }, loaded ? mediaCountLabel(clips) : "Cargando…"),
       ),
       h(
         "div",
@@ -97,6 +97,16 @@ export function createGallery(root: HTMLElement): Gallery {
           { class: "btn", title: "Abrir la carpeta de clips", onclick: () => void api.openClipsFolder() },
           svg(icons.folder),
           "Carpeta",
+        ),
+        h(
+          "button",
+          {
+            class: "btn",
+            title: "Sacar una captura de la pantalla",
+            onclick: () => void api.takeScreenshot(),
+          },
+          svg(icons.camera),
+          "Captura",
         ),
         h(
           "button",

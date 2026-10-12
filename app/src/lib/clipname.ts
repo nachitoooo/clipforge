@@ -14,7 +14,7 @@ export type ClipNameCheck =
 
 export function validateClipName(input: string): ClipNameCheck {
   const trimmed = input.trim();
-  const stem = trimmed.replace(/\.mp4$/i, "").trim();
+  const stem = trimmed.replace(/\.(mp4|png)$/i, "").trim();
 
   if (stem === "") return { ok: false, error: "El nombre no puede estar vacío" };
   if ([...stem].length > MAX_CLIP_NAME_LENGTH) {

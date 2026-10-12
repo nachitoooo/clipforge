@@ -300,6 +300,35 @@ export function createSettings(root: HTMLElement): SettingsView {
     addRow.hidden = count >= MAX_EXTRA_SAVE_SHORTCUTS || draft !== null;
   }
 
+  // The screenshot shortcut: none until one is chosen.
+  const screenshotRecorder = createShortcutRecorder({
+    id: "screenshot",
+    isMac,
+    title: "Elegir el atajo para sacar una captura de pantalla",
+    current: () => settings.shortcuts.screenshot,
+    empty: "Sin atajo",
+    conflict: (accelerator) => ownerOf(accelerator, shortcutOwners(settings, "screenshot")),
+    onChange: (screenshot) => changeShortcuts({ screenshot }),
+  });
+  const clearScreenshot = h(
+    "button",
+    {
+      class: "btn",
+      title: "Quitar el atajo (la captura sigue en la bandeja y en la ventana)",
+      "data-clear-screenshot": "",
+      onclick: () => {
+        screenshotRecorder.stop();
+        changeShortcuts({ screenshot: "" });
+      },
+    },
+    "Quitar",
+  );
+  const screenshotRow = row(
+    "Captura de pantalla",
+    "Guarda una imagen de toda la pantalla junto a tus clips. Sin atajo también se puede sacar desde la bandeja y desde el botón «Captura» de Recientes.",
+    h("div", { class: "mute-controls" }, screenshotRecorder.button, clearScreenshot),
+  );
+
   const shortcutsPanel = h(
     "section",
     { class: "panel", "aria-labelledby": "shortcuts-title" },
@@ -327,6 +356,8 @@ export function createSettings(root: HTMLElement): SettingsView {
       saveRecorder.note,
       extraSlot,
       addRow,
+      screenshotRow,
+      screenshotRecorder.note,
     ),
   );
 
@@ -508,6 +539,8 @@ export function createSettings(root: HTMLElement): SettingsView {
     saveLength.set(settings.shortcuts.clipSeconds);
     saveRow.hint.textContent = `Guarda los últimos ${formatClipLength(settings.shortcuts.clipSeconds)} del buffer`;
     renderExtras();
+    screenshotRecorder.render();
+    clearScreenshot.hidden = settings.shortcuts.screenshot === "";
     resetSaveShortcut.hidden = settings.shortcuts.saveClip === DEFAULT_SAVE_SHORTCUT;
     detectSwitch.input.checked = settings.library.detectGame;
     autoFoldersSwitch.input.checked = settings.library.autoFolders;
@@ -636,6 +669,7 @@ export function createSettings(root: HTMLElement): SettingsView {
       visible = false;
       muteRecorder.stop();
       saveRecorder.stop();
+      screenshotRecorder.stop();
       for (const r of extraRows) r.recorder.stop();
       if (draft) {
         draft = null;

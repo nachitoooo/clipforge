@@ -1,5 +1,6 @@
 import type { ClipInfo } from "../lib/clips";
 import {
+  KIND_OPTIONS,
   NONE,
   RANGE_OPTIONS,
   SORT_OPTIONS,
@@ -8,6 +9,7 @@ import {
   isFiltering,
   type ClipFilter,
   type DateRange,
+  type KindFilter,
   type SortKey,
 } from "../lib/filter";
 import { sortFolders, type FolderInfo } from "../lib/folders";
@@ -55,6 +57,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
   });
   const gameSelect = h("select", { class: "select select-sm", "aria-label": "Juego" });
   const folderSelect = h("select", { class: "select select-sm", "aria-label": "Carpeta" });
+  const kindSelect = h("select", { class: "select select-sm", "aria-label": "Tipo" });
   const rangeSelect = h("select", { class: "select select-sm", "aria-label": "Fecha" });
   const sortSelect = h("select", { class: "select select-sm", "aria-label": "Ordenar por" });
   const status = h("span", { class: "filter-status muted" });
@@ -65,6 +68,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     "Limpiar",
   );
 
+  for (const kind of KIND_OPTIONS) kindSelect.append(option(kind.id, kind.label));
   for (const range of RANGE_OPTIONS) rangeSelect.append(option(range.id, range.label));
   for (const sort of SORT_OPTIONS) sortSelect.append(option(sort.id, sort.label));
 
@@ -74,6 +78,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     search,
     gameSelect,
     options.folderSelector ? folderSelect : null,
+    kindSelect,
     rangeSelect,
     sortSelect,
     status,
@@ -105,6 +110,10 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     state.folder = folderSelect.value === "" ? null : folderSelect.value;
     changed();
   });
+  kindSelect.addEventListener("change", () => {
+    state.kind = kindSelect.value as KindFilter;
+    changed();
+  });
   rangeSelect.addEventListener("change", () => {
     state.range = rangeSelect.value as DateRange;
     changed();
@@ -118,6 +127,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     search.value = state.query;
     gameSelect.value = state.game ?? "";
     folderSelect.value = state.folder ?? "";
+    kindSelect.value = state.kind;
     rangeSelect.value = state.range;
     sortSelect.value = state.sort;
     clear.hidden = !isFiltering(state);
@@ -130,6 +140,9 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     if (notify) changed();
   }
 
+  // What the list is made of decides the words ("clips" or "elementos").
+  let mixed = false;
+
   clear.hidden = true;
   syncControls();
 
@@ -138,6 +151,11 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     get: () => ({ ...state }),
 
     setData({ clips, folders }) {
+      // Nothing to choose between until there is a screenshot.
+      mixed = clips.some((c) => c.kind === "screenshot");
+      kindSelect.hidden = !mixed;
+      if (!mixed) state.kind = "all";
+
       const { games, withoutGame } = gameOptions(clips);
       gameSelect.replaceChildren(option("", "Todos los juegos"));
       for (const game of games) gameSelect.append(option(game.key, `${game.name} (${game.count})`));
@@ -165,7 +183,7 @@ export function createFilterBar(options: FilterBarOptions): FilterBar {
     },
 
     setCount(shown, total) {
-      status.textContent = isFiltering(state) ? `${shown} de ${total} clips` : "";
+      status.textContent = isFiltering(state) ? `${shown} de ${total} ${mixed ? "elementos" : "clips"}` : "";
       clear.hidden = !isFiltering(state);
     },
 

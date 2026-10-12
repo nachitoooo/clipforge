@@ -9,6 +9,10 @@ describe("validateClipName", () => {
     });
     expect(validateClipName("clutch.mp4")).toEqual({ ok: true, stem: "clutch" });
     expect(validateClipName("clutch.MP4")).toEqual({ ok: true, stem: "clutch" });
+    expect(validateClipName("momento.png")).toEqual({ ok: true, stem: "momento" });
+    expect(validateClipName("momento.PNG")).toEqual({ ok: true, stem: "momento" });
+    expect(validateClipName("foto.jpg")).toEqual({ ok: true, stem: "foto.jpg" });
+    expect(validateClipName(".png").ok).toBe(false);
     expect(validateClipName("año nuevo ñandú")).toEqual({
       ok: true,
       stem: "año nuevo ñandú",

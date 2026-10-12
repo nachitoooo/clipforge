@@ -1,5 +1,5 @@
 import * as api from "../api";
-import { clipCountLabel, clipTitle, groupByDay, type ClipInfo } from "../lib/clips";
+import { clipCountLabel, clipTitle, groupByDay, mediaCountLabel, type ClipInfo } from "../lib/clips";
 import { applyFilter, isFiltering, layoutFor, normalizeText } from "../lib/filter";
 import {
   clipsIn,
@@ -326,7 +326,7 @@ export function createLibrary(root: HTMLElement): Library {
           "p",
           { class: "muted" },
           loaded
-            ? `${plural(folders.length, "carpeta", "carpetas")} · ${clipCountLabel(clips.length)}`
+            ? `${plural(folders.length, "carpeta", "carpetas")} · ${mediaCountLabel(clips)}`
             : "Cargando…",
         ),
       ),
