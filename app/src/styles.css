@@ -126,6 +126,14 @@ input {
 
 button {
   cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Buttons stay as they are under the pointer and when pressed: no background,
+   no movement. The keyboard still gets its ring (:focus-visible below). */
+button:focus:not(:focus-visible) {
+  outline: none;
 }
 
 :focus-visible {
@@ -264,13 +272,7 @@ kbd {
   transition: background 0.14s, color 0.14s;
 }
 
-.nav-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
 .nav-btn.active {
-  background: var(--bg-hover);
   color: var(--accent-text);
 }
 
@@ -305,15 +307,6 @@ kbd {
   border-radius: 10px;
   background: var(--bg-raised);
   font-weight: 600;
-  transition: background 0.14s, border-color 0.14s, box-shadow 0.14s, transform 0.08s;
-}
-
-.btn:hover {
-  background: var(--bg-hover);
-}
-
-.btn:active:not(:disabled) {
-  transform: translateY(1px);
 }
 
 .btn-primary {
@@ -322,24 +315,13 @@ kbd {
   color: var(--accent-text);
 }
 
-.btn-primary:hover {
-  border-color: var(--accent);
-  background: var(--bg-hover);
-}
-
 .btn-primary kbd {
   color: var(--text);
 }
 
 .btn-danger {
-  border-color: transparent;
-  background: var(--danger);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset;
-  color: #fff;
-}
-
-.btn-danger:hover {
-  background: #ff6674;
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+  color: var(--danger-text);
 }
 
 .icon-btn {
@@ -355,14 +337,6 @@ kbd {
   transition: background 0.12s, color 0.12s;
 }
 
-.icon-btn:hover {
-  background: rgba(10, 11, 15, 0.95);
-}
-
-.icon-btn-danger:hover {
-  color: #ff6b79;
-}
-
 .pill {
   display: inline-flex;
   align-items: center;
@@ -374,10 +348,6 @@ kbd {
   background: var(--bg-card);
   color: var(--muted);
   font-weight: 600;
-}
-
-.pill:hover {
-  background: var(--bg-hover);
 }
 
 .pill .dot {
@@ -702,10 +672,6 @@ kbd {
   background: transparent;
 }
 
-.player-bar .icon-btn:hover {
-  background: var(--bg-hover);
-}
-
 .player-video {
   width: 100%;
   min-height: 0;
@@ -1025,10 +991,6 @@ kbd {
   transition: border-color 0.14s, background-color 0.14s;
 }
 
-.select:hover {
-  border-color: var(--border-hover);
-}
-
 .select:focus-visible {
   outline: none;
   border-color: var(--accent);
@@ -1059,10 +1021,6 @@ kbd {
   font-weight: 600;
   cursor: pointer;
   transition: border-color 0.14s, background 0.14s;
-}
-
-.mode-card:hover {
-  border-color: var(--border-hover);
 }
 
 .mode-card:has(input:checked) {
@@ -1215,14 +1173,6 @@ kbd {
   cursor: not-allowed;
 }
 
-.btn:disabled:hover {
-  background: var(--bg-raised);
-}
-
-.btn-primary:disabled:hover {
-  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
-}
-
 .editor-stage {
   flex: 1;
   min-height: 90px;
@@ -1259,16 +1209,8 @@ kbd {
   color: var(--accent-text);
 }
 
-.btn-round:hover {
-  border-color: var(--accent);
-}
-
 .icon-btn-flat {
   background: transparent;
-}
-
-.icon-btn-flat:hover {
-  background: var(--bg-hover);
 }
 
 .editor-time {
@@ -1679,11 +1621,6 @@ kbd {
   font-weight: 550;
 }
 
-.crumb:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
 .crumb .icon {
   width: 16px;
   height: 16px;
@@ -1814,11 +1751,6 @@ kbd {
   border-radius: 10px;
   background: var(--bg);
   color: var(--muted);
-}
-
-.icon-choice:hover {
-  background: var(--bg-hover);
-  color: var(--text);
 }
 
 .icon-choice[aria-checked="true"] {
@@ -1984,12 +1916,6 @@ kbd {
   opacity: 0.85;
 }
 
-.game-link:hover {
-  color: var(--accent-text);
-  opacity: 1;
-  text-decoration: underline;
-}
-
 .game-link.game-none {
   color: var(--muted);
   font-weight: 400;
@@ -2046,10 +1972,6 @@ kbd {
   font-size: 13px;
   font-weight: 550;
   transition: border-color 0.14s, box-shadow 0.14s, color 0.14s;
-}
-
-.dropdown-trigger:hover {
-  border-color: var(--border-hover);
 }
 
 .dropdown-value {
@@ -2140,7 +2062,6 @@ kbd {
   gap: 2px;
   border: 1px solid var(--border-strong);
   border-radius: 12px;
-  background: var(--bg-input);
 }
 
 .segment {
@@ -2163,14 +2084,8 @@ kbd {
   height: 16px;
 }
 
-.segment:hover {
-  color: var(--text);
-}
-
 .segment[aria-checked="true"] {
-  border-color: var(--border-strong);
-  background: var(--bg-card);
-  box-shadow: var(--shadow-card);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
   color: var(--accent-text);
 }
 
