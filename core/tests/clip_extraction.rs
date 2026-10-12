@@ -156,17 +156,15 @@ fn capture_keeps_running_during_extraction() {
         let stop = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut n = 120 * FPS;
-            let mut worst = Duration::ZERO;
-            let mut pushes = 0u64;
+            let mut waits = Vec::new();
             while !stop.load(Ordering::SeqCst) {
                 let t = Instant::now();
                 buffer.lock().unwrap().push(packet(n));
-                worst = worst.max(t.elapsed());
-                pushes += 1;
+                waits.push(t.elapsed());
                 n += 1;
                 std::thread::sleep(Duration::from_millis(1000 / FPS));
             }
-            (pushes, worst)
+            waits
         })
     };
 
@@ -180,25 +178,29 @@ fn capture_keeps_running_during_extraction() {
         saves += 1;
     }
     stop.store(true, Ordering::SeqCst);
-    let (pushes, worst_push) = pusher.join().unwrap();
+    let mut waits = pusher.join().unwrap();
+    waits.sort();
+    let pushes = waits.len();
+    let worst_push = *waits.last().unwrap();
+    let typical_push = waits[pushes * 9 / 10]; // the 90th percentile
     let avg_save = total_save_time / saves;
 
     println!(
         "concurrency: {saves} saves (avg {avg_save:?}) while {pushes} pushes ran; \
-         worst push wait {worst_push:?}"
+         worst push wait {worst_push:?}, 90th percentile {typical_push:?}"
     );
     assert!(saves >= 1 && pushes > 0);
     // What we guarantee is lock discipline: the buffer lock is never held
-    // while a clip is muxed/written. If it were, a push would stall for
-    // roughly a whole save. A fixed few-ms bound would be ideal (locally
-    // worst is ~8 ms) but flakes on shared CI runners, where the scheduler
-    // alone can park a thread for tens of ms — so the bound is the greater
-    // of 50 ms and half the measured save time.
-    let threshold = Duration::from_millis(50).max(avg_save / 2);
+    // while a clip is muxed/written. If it were, the saves would run back to
+    // back (as they do here) and *most* pushes would wait for one. A single
+    // slow push proves nothing: on a shared CI runner the scheduler alone can
+    // park a thread for tens of ms (this flaked at 67 ms with 48 ms saves). So
+    // the bound is on the 90th percentile of the waits, not on the worst one.
+    let threshold = Duration::from_millis(20).max(avg_save / 4);
     assert!(
-        worst_push < threshold,
-        "a push stalled {worst_push:?} during clip saves (avg save {avg_save:?}) — \
-         the save path is likely holding the buffer lock during I/O"
+        typical_push < threshold,
+        "pushes stalled (90th percentile {typical_push:?}, worst {worst_push:?}) during clip \
+         saves (avg save {avg_save:?}) — the save path is likely holding the buffer lock during I/O"
     );
     std::fs::remove_dir_all(&dir).ok();
 }

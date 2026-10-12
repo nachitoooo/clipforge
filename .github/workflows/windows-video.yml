@@ -48,6 +48,15 @@ jobs:
           if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; "cable setup timed out" }
           Start-Sleep -Seconds 8
           Get-PnpDevice -Class AudioEndpoint | Format-Table FriendlyName, Status -AutoSize
+          # A Windows Server image denies microphone access to desktop programs,
+          # which a normal Windows 10/11 PC allows by default.
+          foreach ($root in "HKLM:", "HKCU:") {
+            foreach ($sub in "microphone", "microphone\NonPackaged") {
+              $key = "$root\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\$sub"
+              New-Item -Path $key -Force | Out-Null
+              Set-ItemProperty -Path $key -Name Value -Value Allow
+            }
+          }
           exit 0
 
       # Release build: the real app is one, and speed is what is being measured.

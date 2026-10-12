@@ -821,8 +821,12 @@ fn the_recorder_saves_a_clip_with_the_sound_that_was_playing() {
         sound.sample_rate, sound.channels, video.duration
     );
     assert_eq!(sound.sample_rate, 48_000);
+    // Sound only exists from the moment something plays (the tone starts a
+    // little after the recording does), so the audio may be shorter than the
+    // video by that lead-in, never longer.
     assert!(
-        (seconds - saved.duration.as_secs_f64()).abs() < 0.3,
+        seconds <= saved.duration.as_secs_f64() + 0.3
+            && seconds >= saved.duration.as_secs_f64() - 2.0,
         "the sound lasts {seconds:.2} s, the clip {:?}",
         saved.duration
     );

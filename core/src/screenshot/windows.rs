@@ -31,7 +31,7 @@ pub(crate) fn write_png(
         CaptureError::Backend(format!("no se pudo guardar la captura: {e}"))
     };
     let mut rgb = Vec::with_capacity(bgra.len() / 4 * 3);
-    for pixel in bgra.chunks_exact(4) {
+    for pixel in bgra.as_chunks::<4>().0 {
         rgb.extend([pixel[2], pixel[1], pixel[0]]);
     }
     let file = File::create(path).map_err(|e| fail(&e))?;

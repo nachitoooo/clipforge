@@ -74,7 +74,7 @@ pub fn scale_bgra(
             let (y0, y1, wy) = tap(first_row + i, src_h, dst_h);
             let top = &src[y0 * src_stride..y0 * src_stride + src_w * 4];
             let bottom = &src[y1 * src_stride..y1 * src_stride + src_w * 4];
-            for (pixel, t) in out_row.chunks_exact_mut(4).zip(&taps) {
+            for (pixel, t) in out_row.as_chunks_mut::<4>().0.iter_mut().zip(&taps) {
                 for c in 0..4 {
                     let a = top[t.x0 * 4 + c] as u32 * (256 - t.weight)
                         + top[t.x1 * 4 + c] as u32 * t.weight;
