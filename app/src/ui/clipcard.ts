@@ -11,6 +11,7 @@ import { openGameDialog } from "./gamedialog";
 import { icons } from "./icons";
 import { confirmDialog } from "./modal";
 import { openPlayer } from "./player";
+import { copyClip } from "./share";
 import { attempt, toast } from "./toast";
 
 /** The drag payload type: the file name of the clip being dragged. */
@@ -230,6 +231,11 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
         onClick: () => openFolderPicker(clip, () => void options.refresh()),
       },
       ...(options.extraActions?.(clip) ?? []),
+      {
+        label: "Copiar el clip para pegarlo en un chat o un mail",
+        icon: icons.copy,
+        onClick: () => void copyClip(clip),
+      },
       {
         label: "Mostrar el archivo en el disco",
         icon: icons.reveal,

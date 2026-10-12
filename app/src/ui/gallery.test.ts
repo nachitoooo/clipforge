@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   renameClip: vi.fn(),
   deleteClip: vi.fn(),
   revealClip: vi.fn(),
+  copyClip: vi.fn(),
   clipSrc: vi.fn((clip: { path: string }) => `asset://${clip.path}`),
 }));
 vi.mock("../api", () => api);
@@ -150,6 +151,61 @@ describe("the save-clip shortcut shown in the gallery", () => {
     await gallery.refresh();
     expect(headerKey()).toBe("⌥F9");
     await settle();
+  });
+});
+
+describe("copying a clip to paste it elsewhere", () => {
+  const MB = 1024 * 1024;
+  const copyButton = (card: Element) =>
+    card.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copiar el clip para pegarlo en un chat o un mail"]',
+    )!;
+  const toasts = () => document.getElementById("toasts")!.textContent;
+
+  async function withClips(...clips: ClipInfo[]) {
+    api.listClips.mockResolvedValue(clips);
+    const gallery = createGallery(root());
+    await gallery.refresh();
+    return [...root().querySelectorAll(".card")];
+  }
+
+  it("every card can be copied, and it asks for that clip", async () => {
+    api.copyClip.mockResolvedValue(undefined);
+    const cards = await withClips(clip(1), clip(2));
+    expect(cards).toHaveLength(2);
+    copyButton(cards[1]).click();
+    await settle();
+    expect(api.copyClip).toHaveBeenCalledTimes(1);
+    expect(api.copyClip).toHaveBeenCalledWith(cards[1].querySelector(".card-title")!.getAttribute("title"));
+  });
+
+  it("confirms, and does not open the player", async () => {
+    api.copyClip.mockResolvedValue(undefined);
+    const player = await import("./player");
+    const [card] = await withClips(clip(1));
+    copyButton(card).click();
+    await settle();
+    expect(toasts()).toContain("Copiado: pegalo en el chat o en un mail");
+    expect(player.openPlayer).not.toHaveBeenCalled();
+  });
+
+  it("warns when the clip is too big for a chat, but it was copied", async () => {
+    api.copyClip.mockResolvedValue(undefined);
+    const [card] = await withClips({ ...clip(1), sizeBytes: 30 * MB });
+    copyButton(card).click();
+    await settle();
+    expect(toasts()).toContain("Copiado, pero pesa 30,0 MB");
+    expect(toasts()).toContain("Discord sin Nitro (20 MB)");
+    expect(document.querySelector(".toast-error")).toBeNull();
+  });
+
+  it("a clip that can't be copied says why", async () => {
+    api.copyClip.mockRejectedValue("el clip ya no existe en el disco");
+    const [card] = await withClips(clip(1));
+    copyButton(card).click();
+    await settle();
+    expect(document.querySelector(".toast-error")?.textContent).toContain("ya no existe");
+    expect(toasts()).not.toContain("Copiado");
   });
 });
 

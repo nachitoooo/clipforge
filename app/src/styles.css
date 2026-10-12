@@ -428,6 +428,12 @@ kbd {
   transition: opacity 0.14s;
 }
 
+/* seven buttons (a folder view) have to fit the narrowest card */
+.card-actions .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
 .card:hover .card-actions,
 .card:focus-within .card-actions {
   opacity: 1;

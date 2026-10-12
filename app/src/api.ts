@@ -15,6 +15,8 @@ export const renameClip = (name: string, newName: string) =>
   invoke<string>("rename_clip", { name, newName });
 export const deleteClip = (name: string) => invoke<void>("delete_clip", { name });
 export const revealClip = (name: string) => invoke<void>("reveal_clip", { name });
+/** Put the clip's file on the system clipboard, to paste it in a chat or a mail. */
+export const copyClip = (name: string) => invoke<void>("copy_clip", { name });
 /** Set (or clear, with null) a clip's game; with `all`, every clip of its current game. Resolves with how many changed. */
 export const setClipGame = (name: string, game: string | null, all: boolean) =>
   invoke<number>("set_clip_game", { name, game, all });

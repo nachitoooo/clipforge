@@ -5,6 +5,7 @@ import { h, svg } from "./dom";
 import { icons } from "./icons";
 import { openEditor } from "./editor";
 import { openModal } from "./modal";
+import { copyClip } from "./share";
 
 /** Full-size playback of one clip. */
 export function openPlayer(clip: ClipInfo): void {
@@ -29,6 +30,16 @@ export function openPlayer(clip: ClipInfo): void {
       h(
         "div",
         { class: "player-actions" },
+        h(
+          "button",
+          {
+            class: "btn",
+            title: "Copiar el clip para pegarlo en un chat o un mail",
+            onclick: () => void copyClip(clip),
+          },
+          svg(icons.copy),
+          "Copiar",
+        ),
         h(
           "button",
           {
