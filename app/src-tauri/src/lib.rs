@@ -85,11 +85,13 @@ impl Registry for AppRegistry<'_> {
 /// The tray menu entries whose label depends on a setting.
 struct TrayItems {
     save: MenuItem<Wry>,
+    screenshot: MenuItem<Wry>,
 }
 
 /// Show the length and the shortcut of the main save in the tray's "save clip"
-/// entry (the extra shortcuts have no entry of their own).
-fn show_save_in_tray(app: &AppHandle, shortcuts: &settings::ShortcutSettings) {
+/// entry (the extra shortcuts have no entry of their own), and the screenshot
+/// shortcut, if there is one, next to "take a screenshot".
+fn show_shortcuts_in_tray(app: &AppHandle, shortcuts: &settings::ShortcutSettings) {
     let tray = app.state::<TrayItems>();
     let label = format!(
         "Guardar clip (últimos {})",
@@ -103,6 +105,10 @@ fn show_save_in_tray(app: &AppHandle, shortcuts: &settings::ShortcutSettings) {
             "clipforge: tray shortcut hint «{}»: {e}",
             shortcuts.save_clip
         );
+    }
+    let screenshot = (!shortcuts.screenshot.is_empty()).then_some(shortcuts.screenshot.as_str());
+    if let Err(e) = tray.screenshot.set_accelerator(screenshot) {
+        eprintln!("clipforge: tray screenshot hint: {e}");
     }
 }
 
@@ -126,7 +132,36 @@ impl AppActions {
     fn settings(&self) -> tauri::State<'_, Arc<SettingsStore>> {
         self.app.state::<Arc<SettingsStore>>()
     }
+
+    /// A clip or a screenshot was just saved: note its game (what was in front
+    /// during the last `lookback_seconds`; ClipForge itself is ignored, so saving
+    /// from the tray or the window still names the game), file it in the folder
+    /// of that game when automatic folders are on, and tell the views.
+    fn register_new_file(&self, name: &str, lookback_seconds: u64) {
+        let game = self.recorder().detected_game(lookback_seconds);
+        let meta = self.app.state::<ClipMetaStore>();
+        keep_index(meta.set_detected_game(name, game.as_deref()));
+        // With automatic folders on, the file goes into the folder of its game
+        // (the spelling the index kept, so "VALORANT" joins "Valorant").
+        if self.settings().get().library.auto_folders {
+            if let Some(game) = meta.game_of(name) {
+                keep_index(self.app.state::<FolderStore>().file_under_game(&game, name));
+            }
+        }
+        // The gallery refreshes itself on this event (F-3.1 "live update").
+        self.app.emit("clip-saved", name).ok();
+    }
 }
+
+/// The name of a file inside the clips folder.
+fn file_name_of(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// A screenshot is tagged with the application in front over this many seconds.
+const SCREENSHOT_GAME_LOOKBACK_SECONDS: u64 = 5;
 
 /// Apply the microphone settings off the calling thread (opening a device can
 /// block on the permission prompt) and tell the UI how it went.
@@ -167,30 +202,19 @@ impl Actions for AppActions {
     fn save_clip(&self, seconds: Option<u64>) -> Result<String, String> {
         let seconds = seconds.unwrap_or_else(|| self.settings().get().shortcuts.clip_seconds);
         let saved = self.recorder().save_clip(seconds)?;
-        let name = saved
-            .path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        // The game is whatever held the screen for most of the clip. Saving
-        // from the tray or the window works too: ClipForge itself is ignored.
-        let game = self.recorder().detected_game(seconds);
-        let meta = self.app.state::<ClipMetaStore>();
-        keep_index(meta.set_detected_game(&name, game.as_deref()));
-        // With automatic folders on, the clip goes into the folder of its game
-        // (the spelling the index kept, so "VALORANT" joins "Valorant").
-        if self.settings().get().library.auto_folders {
-            if let Some(game) = meta.game_of(&name) {
-                keep_index(
-                    self.app
-                        .state::<FolderStore>()
-                        .file_under_game(&game, &name),
-                );
-            }
-        }
-        // The gallery refreshes itself on this event (F-3.1 "live update").
-        self.app.emit("clip-saved", &name).ok();
+        let name = file_name_of(&saved.path);
+        // The game is whatever held the screen for most of the clip.
+        self.register_new_file(&name, seconds);
         Ok(format!("{:.0} s → {name}", saved.duration.as_secs_f64()))
+    }
+
+    fn take_screenshot(&self) -> Result<String, String> {
+        let path = clipforge_core::screenshot::next_path(&self.recorder().clips_dir());
+        let shot = clipforge_core::screenshot::capture_png(&path).map_err(|e| e.to_string())?;
+        let name = file_name_of(&path);
+        // A picture is of what is in front *now*: the last few seconds.
+        self.register_new_file(&name, SCREENSHOT_GAME_LOOKBACK_SECONDS);
+        Ok(format!("{}×{} → {name}", shot.width, shot.height))
     }
 
     fn open_clips_folder(&self) {
@@ -261,6 +285,11 @@ fn toggle_buffer(app: AppHandle) {
 #[tauri::command]
 fn save_clip(app: AppHandle) {
     run_command(&app, Command::SaveClip(None));
+}
+
+#[tauri::command]
+fn take_screenshot(app: AppHandle) {
+    run_command(&app, Command::Screenshot);
 }
 
 #[tauri::command]
@@ -354,7 +383,7 @@ fn folder_info(recorder: &Recorder, folders: &FolderStore, id: &str) -> Result<F
 fn existing_clips(recorder: &Recorder, names: &[String]) -> Result<Vec<String>, String> {
     let dir = recorder.clips_dir();
     for name in names {
-        if !library::clip_path(&dir, name)?.is_file() {
+        if !library::media_path(&dir, name)?.is_file() {
             return Err(format!("el clip «{name}» ya no existe"));
         }
     }
@@ -482,7 +511,7 @@ fn remove_from_folder(
     // The files may be gone already; only the names have to be plain.
     let dir = recorder.clips_dir();
     for name in &names {
-        library::clip_path(&dir, name)?;
+        library::media_path(&dir, name)?;
     }
     let removed = folders.remove_from_folder(&id, &names)?;
     library_changed(&app);
@@ -495,7 +524,7 @@ fn reveal_clip(
     recorder: tauri::State<'_, Recorder>,
     name: String,
 ) -> Result<(), String> {
-    let path = library::clip_path(&recorder.clips_dir(), &name)?;
+    let path = library::media_path(&recorder.clips_dir(), &name)?;
     app.opener()
         .reveal_item_in_dir(path)
         .map_err(|e| format!("no se pudo abrir la carpeta: {e}"))
@@ -505,7 +534,7 @@ fn reveal_clip(
 /// a mail or a folder as a file.
 #[tauri::command]
 async fn copy_clip(app: AppHandle, name: String) -> Result<(), String> {
-    let path = library::clip_path(&app.state::<Recorder>().clips_dir(), &name)?;
+    let path = library::media_path(&app.state::<Recorder>().clips_dir(), &name)?;
     blocking(move || clipforge_core::clipboard::copy_file(&path)).await
 }
 
@@ -573,10 +602,8 @@ fn update_settings(
             return Err(e);
         }
     };
-    if saved.shortcuts.save_clip != previous.shortcuts.save_clip
-        || saved.shortcuts.clip_seconds != previous.shortcuts.clip_seconds
-    {
-        show_save_in_tray(&app, &saved.shortcuts);
+    if saved.shortcuts != previous.shortcuts {
+        show_shortcuts_in_tray(&app, &saved.shortcuts);
     }
     app.emit("settings-changed", &saved).ok();
     app.state::<Recorder>().apply_live_controls();
@@ -629,6 +656,9 @@ pub fn run() {
                         Some(ShortcutAction::ToggleMicMute) => {
                             run_command(app.app_handle(), Command::ToggleMicMute)
                         }
+                        Some(ShortcutAction::Screenshot) => {
+                            run_command(app.app_handle(), Command::Screenshot)
+                        }
                         None => {}
                     }
                 })
@@ -638,6 +668,7 @@ pub fn run() {
             buffer_status,
             toggle_buffer,
             save_clip,
+            take_screenshot,
             open_clips_folder,
             list_clips,
             rename_clip,
@@ -686,6 +717,8 @@ pub fn run() {
             let toggle =
                 MenuItemBuilder::with_id("toggle_buffer", "Iniciar/Detener buffer").build(app)?;
             let save = MenuItemBuilder::with_id("save_clip", "Guardar clip").build(app)?; // label set below
+            let screenshot =
+                MenuItemBuilder::with_id("screenshot", "Tomar captura de pantalla").build(app)?;
             let mute = MenuItemBuilder::with_id("toggle_mic_mute", "Silenciar/activar micrófono")
                 .build(app)?;
             let open =
@@ -694,14 +727,18 @@ pub fn run() {
             let menu = MenuBuilder::new(app)
                 .item(&toggle)
                 .item(&save)
+                .item(&screenshot)
                 .item(&mute)
                 .separator()
                 .item(&open)
                 .separator()
                 .item(&quit)
                 .build()?;
-            app.manage(TrayItems { save: save.clone() });
-            show_save_in_tray(app.handle(), &settings.get().shortcuts);
+            app.manage(TrayItems {
+                save: save.clone(),
+                screenshot: screenshot.clone(),
+            });
+            show_shortcuts_in_tray(app.handle(), &settings.get().shortcuts);
             TrayIconBuilder::with_id("clipforge-tray")
                 .icon(app.default_window_icon().expect("app icon").clone())
                 .tooltip("ClipForge")

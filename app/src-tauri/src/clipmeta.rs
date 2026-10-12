@@ -231,6 +231,7 @@ mod tests {
     fn clip(name: &str) -> ClipInfo {
         ClipInfo {
             name: name.into(),
+            kind: crate::library::ClipKind::Clip,
             path: format!("/clips/{name}"),
             size_bytes: 1,
             modified_ms: 0,

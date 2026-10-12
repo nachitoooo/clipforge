@@ -332,7 +332,14 @@ mod tests {
     #[test]
     fn names_cannot_escape_the_clips_folder() {
         let dir = Folder::new("escape");
-        for name in ["../clip.mp4", "sub/clip.mp4", "..", "clip.txt", ""] {
+        for name in [
+            "../clip.mp4",
+            "sub/clip.mp4",
+            "..",
+            "clip.txt",
+            "",
+            "captura.png",
+        ] {
             assert!(describe(&dir.0, name).is_err(), "{name:?}");
             assert!(waveform(&dir.0, name, 0).is_err(), "{name:?}");
             assert!(

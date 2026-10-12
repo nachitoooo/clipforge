@@ -99,6 +99,9 @@ pub struct ShortcutSettings {
     pub clip_seconds: u64,
     /// More save shortcuts, each with its own length.
     pub extra_save_clip: Vec<ClipShortcut>,
+    /// Takes a screenshot. Empty = no shortcut (the default: nothing is
+    /// registered that nobody asked for; the tray and the window have a button).
+    pub screenshot: String,
 }
 
 impl Default for ShortcutSettings {
@@ -107,6 +110,7 @@ impl Default for ShortcutSettings {
             save_clip: DEFAULT_SAVE_SHORTCUT.to_string(),
             clip_seconds: DEFAULT_CLIP_SECONDS,
             extra_save_clip: Vec::new(),
+            screenshot: String::new(),
         }
     }
 }
@@ -264,6 +268,17 @@ impl Settings {
             extra.seconds = clamp_seconds(extra.seconds);
         }
 
+        let screenshot_text = self.shortcuts.screenshot.trim().to_string();
+        if !screenshot_text.is_empty() {
+            let shortcut = parse_shortcut(&screenshot_text)?;
+            if taken.contains(&shortcut) {
+                return Err(format!(
+                    "el atajo «{screenshot_text}» ya está en uso: cada atajo tiene que ser distinto"
+                ));
+            }
+        }
+        self.shortcuts.screenshot = screenshot_text;
+
         let mic = &mut self.microphone;
 
         mic.gain_percent = mic.gain_percent.clamp(GAIN_MIN_PERCENT, GAIN_MAX_PERCENT);
@@ -317,6 +332,15 @@ impl Settings {
         self.shortcuts
             .extra_save_clip
             .truncate(MAX_EXTRA_SAVE_SHORTCUTS);
+
+        // The screenshot shortcut is optional: one that can't be used is dropped.
+        let screenshot_ok = match parse_shortcut(&self.shortcuts.screenshot) {
+            Ok(shortcut) => !taken.contains(&shortcut),
+            Err(_) => false,
+        };
+        if !screenshot_ok {
+            self.shortcuts.screenshot = String::new();
+        }
         self
     }
 }
@@ -1007,5 +1031,112 @@ mod tests {
         assert_eq!(json["shortcuts"]["clipSeconds"], 30);
         assert_eq!(json["shortcuts"]["extraSaveClip"][0]["accelerator"], "F9");
         assert_eq!(json["shortcuts"]["extraSaveClip"][0]["seconds"], 15);
+    }
+
+    // ---- the screenshot shortcut ----
+
+    #[test]
+    fn there_is_no_screenshot_shortcut_until_one_is_chosen() {
+        let s = Settings::default();
+        assert_eq!(s.shortcuts.screenshot, "");
+        assert!(s.clone().validated().is_ok());
+        let json = serde_json::to_value(s).unwrap();
+        assert_eq!(json["shortcuts"]["screenshot"], "");
+    }
+
+    #[test]
+    fn a_screenshot_shortcut_follows_the_same_rules_as_the_others() {
+        let mut s = Settings::default();
+        s.shortcuts.screenshot = "  F8 ".into();
+        assert_eq!(s.validated().unwrap().shortcuts.screenshot, "F8", "trimmed");
+
+        for bad in ["Banana", "S", "Space"] {
+            let mut s = Settings::default();
+            s.shortcuts.screenshot = bad.into();
+            assert!(s.validated().is_err(), "{bad:?} should be refused");
+        }
+    }
+
+    #[test]
+    fn the_screenshot_shortcut_cannot_share_keys_with_any_other() {
+        for (other, label) in [
+            ("CmdOrCtrl+Shift+S", "the main save shortcut"),
+            ("CommandOrControl+Shift+M", "the mute shortcut"),
+            ("f9", "an extra save shortcut"),
+        ] {
+            let mut s = Settings::default();
+            s.shortcuts.extra_save_clip = vec![extra("F9", 15)];
+            s.shortcuts.screenshot = other.into();
+            let err = s.validated().unwrap_err();
+            assert!(err.contains("ya está en uso"), "{label}: {err}");
+        }
+    }
+
+    #[test]
+    fn the_screenshot_shortcut_survives_a_restart_and_can_be_cleared() {
+        let dir = TempDir::new("screenshot-shortcut");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.shortcuts.screenshot = "F8".into();
+        store.replace(s.clone().validated().unwrap()).unwrap();
+        assert_eq!(
+            SettingsStore::load(dir.file()).get().shortcuts.screenshot,
+            "F8"
+        );
+
+        s.shortcuts.screenshot = String::new();
+        store.replace(s.validated().unwrap()).unwrap();
+        assert_eq!(
+            SettingsStore::load(dir.file()).get().shortcuts.screenshot,
+            ""
+        );
+    }
+
+    #[test]
+    fn a_file_from_before_screenshots_has_no_screenshot_shortcut() {
+        let dir = TempDir::new("before-screenshots");
+        fs::write(
+            dir.file(),
+            r#"{"shortcuts":{"saveClip":"F9","clipSeconds":60}}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert_eq!(s.shortcuts.screenshot, "");
+        assert_eq!(s.shortcuts.save_clip, "F9");
+    }
+
+    #[test]
+    fn a_hand_edited_screenshot_shortcut_that_cannot_work_is_dropped() {
+        for (text, label) in [
+            ("nonsense", "does not parse"),
+            ("S", "a letter alone"),
+            ("CommandOrControl+Shift+S", "the save default"),
+            ("F9", "an extra one"),
+        ] {
+            let dir = TempDir::new("screenshot-repair");
+            fs::write(
+                dir.file(),
+                format!(
+                    r#"{{"shortcuts":{{"screenshot":"{text}","extraSaveClip":[{{"accelerator":"F9","seconds":15}}]}}}}"#
+                ),
+            )
+            .unwrap();
+            let s = SettingsStore::load(dir.file()).get();
+            assert_eq!(s.shortcuts.screenshot, "", "{label}");
+            assert_eq!(
+                s.shortcuts.extra_save_clip.len(),
+                1,
+                "{label}: the rest is kept"
+            );
+            assert!(s.validated().is_ok());
+        }
+
+        // A good one stays.
+        let dir = TempDir::new("screenshot-repair-ok");
+        fs::write(dir.file(), r#"{"shortcuts":{"screenshot":"F8"}}"#).unwrap();
+        assert_eq!(
+            SettingsStore::load(dir.file()).get().shortcuts.screenshot,
+            "F8"
+        );
     }
 }

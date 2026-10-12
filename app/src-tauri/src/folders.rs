@@ -498,6 +498,7 @@ mod tests {
     fn clip(name: &str, size: u64) -> ClipInfo {
         ClipInfo {
             name: name.into(),
+            kind: crate::library::ClipKind::Clip,
             path: format!("/clips/{name}"),
             size_bytes: size,
             modified_ms: 0,

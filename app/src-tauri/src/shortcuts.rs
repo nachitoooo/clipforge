@@ -17,6 +17,7 @@ pub enum ShortcutAction {
     /// Save the last this-many seconds.
     SaveClip(u64),
     ToggleMicMute,
+    Screenshot,
 }
 
 /// What the user calls each shortcut, for messages.
@@ -26,6 +27,7 @@ fn name_of(action: ShortcutAction) -> String {
             format!("guardar clip de {}", clip_length_label(seconds))
         }
         ShortcutAction::ToggleMicMute => "silenciar el micrófono".to_string(),
+        ShortcutAction::Screenshot => "tomar una captura de pantalla".to_string(),
     }
 }
 
@@ -48,6 +50,9 @@ fn wanted(settings: &Settings) -> Vec<(ShortcutAction, &str)> {
             extra.accelerator.as_str(),
         )
     }));
+    if !shortcuts.screenshot.is_empty() {
+        list.push((ShortcutAction::Screenshot, shortcuts.screenshot.as_str()));
+    }
     list
 }
 
@@ -501,5 +506,63 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("no válido"));
         assert!(registry.has("F9") && registry.count() == 3);
+    }
+
+    // ---- the screenshot shortcut ----
+
+    fn with_screenshot(accelerator: &str) -> Settings {
+        let mut s = settings(SAVE, MUTE);
+        s.shortcuts.screenshot = accelerator.into();
+        s
+    }
+
+    #[test]
+    fn no_screenshot_shortcut_registers_nothing() {
+        let registry = Fake::default();
+        assert!(register_all(&registry, &settings(SAVE, MUTE)).is_empty());
+        assert_eq!(registry.count(), 2, "only save and mute");
+    }
+
+    #[test]
+    fn the_screenshot_shortcut_takes_a_screenshot() {
+        let s = with_screenshot("F8");
+        assert_eq!(action_for(&s, &key("F8")), Some(ShortcutAction::Screenshot));
+        // Another spelling of the same keys is the same shortcut.
+        assert_eq!(
+            action_for(&with_screenshot("Alt+Shift+F8"), &key("Shift+Alt+F8")),
+            Some(ShortcutAction::Screenshot)
+        );
+        // Without one, no key is a screenshot.
+        assert_eq!(action_for(&settings(SAVE, MUTE), &key("F8")), None);
+    }
+
+    #[test]
+    fn choosing_and_clearing_the_screenshot_shortcut_moves_only_that_one() {
+        let registry = Fake::with(&[SAVE, MUTE], &[]);
+        switch(&registry, &settings(SAVE, MUTE), &with_screenshot("F8")).unwrap();
+        assert!(registry.has("F8") && registry.has(SAVE) && registry.has(MUTE));
+        assert_eq!(registry.count(), 3);
+
+        switch(&registry, &with_screenshot("F8"), &with_screenshot("F7")).unwrap();
+        assert!(!registry.has("F8") && registry.has("F7"));
+
+        switch(&registry, &with_screenshot("F7"), &settings(SAVE, MUTE)).unwrap();
+        assert!(!registry.has("F7"));
+        assert_eq!(registry.count(), 2);
+    }
+
+    #[test]
+    fn a_taken_screenshot_shortcut_is_refused_and_named() {
+        let registry = Fake::with(&[SAVE, MUTE], &["F8"]);
+        let err = switch(&registry, &settings(SAVE, MUTE), &with_screenshot("F8")).unwrap_err();
+        assert!(
+            err.contains("F8") && err.contains("captura de pantalla"),
+            "{err}"
+        );
+        assert_eq!(registry.count(), 2, "nothing else moved");
+
+        let problems = register_all(&Fake::with(&[], &["F8"]), &with_screenshot("F8"));
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("captura"), "{}", problems[0]);
     }
 }

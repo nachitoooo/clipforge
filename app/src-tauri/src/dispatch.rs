@@ -8,6 +8,8 @@ pub enum Command {
     /// Save the last this-many seconds; `None` = the length set in Settings
     /// (the tray entry and the window's button).
     SaveClip(Option<u64>),
+    /// A picture of the screen, saved next to the clips.
+    Screenshot,
     OpenClipsFolder,
     /// Silence or restore the microphone (hotkey or tray).
     ToggleMicMute,
@@ -29,6 +31,7 @@ impl Command {
         match id {
             "toggle_buffer" => Some(Self::ToggleBuffer),
             "save_clip" => Some(Self::SaveClip(None)),
+            "screenshot" => Some(Self::Screenshot),
             "open_folder" => Some(Self::OpenClipsFolder),
             "toggle_mic_mute" => Some(Self::ToggleMicMute),
             "quit" => Some(Self::Quit),
@@ -46,6 +49,8 @@ pub trait Actions {
     /// Saves the last `seconds` (the length from Settings when `None`) and
     /// returns a human-readable description of the saved clip.
     fn save_clip(&self, seconds: Option<u64>) -> Result<String, String>;
+    /// Saves a screenshot and returns a human-readable description of it.
+    fn take_screenshot(&self) -> Result<String, String>;
     fn open_clips_folder(&self);
     fn toggle_mic_mute(&self) -> Result<MuteOutcome, String>;
     fn quit(&self);
@@ -71,6 +76,10 @@ pub fn dispatch(command: Command, actions: &impl Actions) {
             Ok(description) => actions.notify("Clip guardado", &description),
             Err(e) => actions.notify("No se pudo guardar el clip", &e),
         },
+        Command::Screenshot => match actions.take_screenshot() {
+            Ok(description) => actions.notify("Captura guardada", &description),
+            Err(e) => actions.notify("No se pudo tomar la captura", &e),
+        },
         Command::OpenClipsFolder => actions.open_clips_folder(),
         Command::ToggleMicMute => match actions.toggle_mic_mute() {
             Ok(MuteOutcome::Muted) => actions.notify("Micrófono", "Micrófono silenciado"),
@@ -94,6 +103,7 @@ mod tests {
     struct Mock {
         running: std::cell::Cell<bool>,
         save_result: Option<Result<String, String>>,
+        screenshot_result: Option<Result<String, String>>,
         calls: RefCell<Vec<String>>,
         notifications: RefCell<Vec<(String, String)>>,
         mute_result: Option<Result<MuteOutcome, String>>,
@@ -118,6 +128,12 @@ mod tests {
                 None => "save".into(),
             });
             self.save_result.clone().unwrap_or(Ok("clip 30 s".into()))
+        }
+        fn take_screenshot(&self) -> Result<String, String> {
+            self.calls.borrow_mut().push("screenshot".into());
+            self.screenshot_result
+                .clone()
+                .unwrap_or(Ok("2940×1912 → captura.png".into()))
         }
         fn open_clips_folder(&self) {
             self.calls.borrow_mut().push("open".into());
@@ -176,6 +192,32 @@ mod tests {
         dispatch(Command::SaveClip(Some(120)), &mock);
         assert_eq!(mock.calls.borrow().as_slice(), ["save 15", "save 120"]);
         assert_eq!(mock.notifications.borrow().len(), 2);
+    }
+
+    #[test]
+    fn the_screenshot_command_is_in_the_tray_menu_and_announces_the_result() {
+        assert_eq!(
+            Command::from_menu_id("screenshot"),
+            Some(Command::Screenshot)
+        );
+        let mock = Mock::default();
+        dispatch(Command::Screenshot, &mock);
+        assert_eq!(mock.calls.borrow().as_slice(), ["screenshot"]);
+        let notes = mock.notifications.borrow();
+        assert_eq!(notes[0].0, "Captura guardada");
+        assert!(notes[0].1.contains("captura.png"));
+    }
+
+    #[test]
+    fn a_screenshot_that_fails_says_why() {
+        let mock = Mock {
+            screenshot_result: Some(Err("permiso denegado".into())),
+            ..Default::default()
+        };
+        dispatch(Command::Screenshot, &mock);
+        let notes = mock.notifications.borrow();
+        assert_eq!(notes[0].0, "No se pudo tomar la captura");
+        assert!(notes[0].1.contains("permiso denegado"));
     }
 
     #[test]

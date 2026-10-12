@@ -1,4 +1,5 @@
-//! Clips library: list, rename and delete the .mp4 files in the clips folder.
+//! Clips library: list, rename and delete the files in the clips folder — the
+//! `.mp4` clips and the `.png` screenshots.
 //!
 //! Pure filesystem logic, free of Tauri types so it is unit testable. The UI
 //! only ever sends file *names*; every name is validated here so a compromised
@@ -12,15 +13,46 @@ use serde::Serialize;
 
 use crate::folders::FolderStore;
 
-const EXTENSION: &str = "mp4";
+const CLIP_EXTENSION: &str = "mp4";
+const SCREENSHOT_EXTENSION: &str = "png";
 const MAX_STEM_LEN: usize = 120;
 const FORBIDDEN_CHARS: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+
+/// What a file in the library is. Everything the editor does (trim, waveform)
+/// is for clips only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClipKind {
+    /// A recorded video, `.mp4`.
+    Clip,
+    /// A picture of the screen, `.png`.
+    Screenshot,
+}
+
+impl ClipKind {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Clip => CLIP_EXTENSION,
+            Self::Screenshot => SCREENSHOT_EXTENSION,
+        }
+    }
+
+    /// The kind of file `path` is by its extension (any capitals), if the
+    /// library holds that sort of file at all.
+    pub fn of(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?;
+        [Self::Clip, Self::Screenshot]
+            .into_iter()
+            .find(|kind| extension.eq_ignore_ascii_case(kind.extension()))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipInfo {
     /// File name inside the clips folder; the UI's stable id.
     pub name: String,
+    pub kind: ClipKind,
     /// Absolute path, for the webview asset protocol.
     pub path: String,
     pub size_bytes: u64,
@@ -34,13 +66,8 @@ pub struct ClipInfo {
     pub game: Option<String>,
 }
 
-fn is_clip_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION))
-}
-
-/// All clips in `dir`, newest first. A missing folder is an empty library.
+/// All clips and screenshots in `dir`, newest first. A missing folder is an
+/// empty library.
 pub fn list_clips(dir: &Path) -> Result<Vec<ClipInfo>, String> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -52,9 +79,7 @@ pub fn list_clips(dir: &Path) -> Result<Vec<ClipInfo>, String> {
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let path = entry.path();
-            if !is_clip_file(&path) {
-                return None;
-            }
+            let kind = ClipKind::of(&path)?;
             let meta = entry.metadata().ok().filter(|m| m.is_file())?;
             let modified_ms = meta
                 .modified()
@@ -63,6 +88,7 @@ pub fn list_clips(dir: &Path) -> Result<Vec<ClipInfo>, String> {
                 .map_or(0, |d| d.as_millis() as u64);
             Some(ClipInfo {
                 name: entry.file_name().to_string_lossy().into_owned(),
+                kind,
                 path: path.to_string_lossy().into_owned(),
                 size_bytes: meta.len(),
                 modified_ms,
@@ -80,22 +106,34 @@ pub fn list_clips(dir: &Path) -> Result<Vec<ClipInfo>, String> {
     Ok(clips)
 }
 
-/// Resolve a UI-supplied clip file name to a path inside `dir`.
+/// A bare file name: no folders in it, nothing that walks out of the library.
+fn is_plain_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != ".."
+}
+
+/// Resolve a UI-supplied name to a path inside `dir`, for a **clip** — a video:
+/// what the editor opens. A screenshot's name is refused here.
 pub fn clip_path(dir: &Path, name: &str) -> Result<PathBuf, String> {
-    let is_plain_name = !name.is_empty()
-        && !name.contains(['/', '\\', '\0'])
-        && name != "."
-        && name != ".."
-        && is_clip_file(Path::new(name));
-    if !is_plain_name {
-        return Err(format!("nombre de clip inválido: {name:?}"));
+    if is_plain_name(name) && ClipKind::of(Path::new(name)) == Some(ClipKind::Clip) {
+        Ok(dir.join(name))
+    } else {
+        Err(format!("nombre de clip inválido: {name:?}"))
     }
-    Ok(dir.join(name))
+}
+
+/// Resolve a UI-supplied name to a path inside `dir`, for anything the library
+/// holds, clip or screenshot: what rename, delete, folders and copy work on.
+pub fn media_path(dir: &Path, name: &str) -> Result<PathBuf, String> {
+    if is_plain_name(name) && ClipKind::of(Path::new(name)).is_some() {
+        Ok(dir.join(name))
+    } else {
+        Err(format!("nombre de clip inválido: {name:?}"))
+    }
 }
 
 pub fn delete_clip(dir: &Path, name: &str) -> Result<(), String> {
-    let path = clip_path(dir, name)?;
-    fs::remove_file(&path).map_err(|e| format!("no se pudo borrar el clip: {e}"))
+    let path = media_path(dir, name)?;
+    fs::remove_file(&path).map_err(|e| format!("no se pudo borrar el archivo: {e}"))
 }
 
 /// Delete a library folder. With `delete_clips`, the clips that are in this
@@ -115,7 +153,7 @@ pub fn delete_folder(
         let mut gone = Vec::new();
         let mut failed = 0;
         for name in store.exclusive_clips(id)? {
-            let path = clip_path(dir, &name)?;
+            let path = media_path(dir, &name)?;
             match fs::remove_file(&path) {
                 Ok(()) => {
                     deleted.push(name.clone());
@@ -137,13 +175,19 @@ pub fn delete_folder(
     Ok(deleted)
 }
 
-/// Validate a user-typed clip name (with or without the `.mp4` suffix) and
-/// return the bare stem.
+/// Validate a user-typed name (with or without a `.mp4` / `.png` suffix) and
+/// return the bare stem. The file keeps its own extension: a screenshot stays a
+/// `.png` whatever is typed.
 pub fn sanitize_stem(input: &str) -> Result<String, String> {
     let trimmed = input.trim();
-    let stem = trimmed
-        .strip_suffix(".mp4")
-        .or_else(|| trimmed.strip_suffix(".MP4"))
+    let stem = [CLIP_EXTENSION, SCREENSHOT_EXTENSION]
+        .iter()
+        .find_map(|extension| {
+            let cut = trimmed.len().checked_sub(extension.len() + 1)?;
+            let (stem, suffix) = (trimmed.get(..cut)?, trimmed.get(cut..)?);
+            let dotted = suffix.starts_with('.') && suffix[1..].eq_ignore_ascii_case(extension);
+            dotted.then_some(stem)
+        })
         .unwrap_or(trimmed)
         .trim();
 
@@ -167,18 +211,20 @@ pub fn sanitize_stem(input: &str) -> Result<String, String> {
     Ok(stem.to_string())
 }
 
-/// Rename a clip; returns the new file name. Never overwrites another clip.
+/// Rename a clip or a screenshot; returns the new file name, with the same
+/// extension. Never overwrites another file.
 pub fn rename_clip(dir: &Path, name: &str, new_name: &str) -> Result<String, String> {
-    let from = clip_path(dir, name)?;
-    let new_file = format!("{}.{EXTENSION}", sanitize_stem(new_name)?);
+    let from = media_path(dir, name)?;
+    let kind = ClipKind::of(&from).ok_or_else(|| format!("nombre de clip inválido: {name:?}"))?;
+    let new_file = format!("{}.{}", sanitize_stem(new_name)?, kind.extension());
     if new_file == name {
         return Ok(new_file);
     }
     let to = dir.join(&new_file);
     if to.exists() {
-        return Err("ya existe un clip con ese nombre".into());
+        return Err("ya existe un archivo con ese nombre".into());
     }
-    fs::rename(&from, &to).map_err(|e| format!("no se pudo renombrar el clip: {e}"))?;
+    fs::rename(&from, &to).map_err(|e| format!("no se pudo renombrar el archivo: {e}"))?;
     Ok(new_file)
 }
 
@@ -458,6 +504,7 @@ mod tests {
         assert!(!fine.exists(), "the deletable one is gone");
         let listed = store.list(&[ClipInfo {
             name: "stuck.mp4".into(),
+            kind: ClipKind::Clip,
             path: String::new(),
             size_bytes: 0,
             modified_ms: 0,
@@ -481,5 +528,128 @@ mod tests {
         let dir = TempDir::new("list-no-folders");
         dir.touch("a.mp4", 1, 1);
         assert!(list_clips(&dir.0).unwrap()[0].folders.is_empty());
+    }
+
+    // ---- screenshots ----
+
+    #[test]
+    fn screenshots_are_listed_with_the_clips_and_know_what_they_are() {
+        let dir = TempDir::new("screenshots-list");
+        dir.touch("clip-1.mp4", 100, 30);
+        dir.touch("captura-1.png", 10, 10);
+        dir.touch("UPPER.PNG", 20, 20);
+        dir.touch("photo.jpg", 5, 1);
+        dir.touch("captura-2.png.part", 5, 1); // a capture in progress is not listed
+
+        let listed = list_clips(&dir.0).unwrap();
+        let seen: Vec<_> = listed.iter().map(|c| (c.name.as_str(), c.kind)).collect();
+        assert_eq!(
+            seen,
+            [
+                ("captura-1.png", ClipKind::Screenshot),
+                ("UPPER.PNG", ClipKind::Screenshot),
+                ("clip-1.mp4", ClipKind::Clip),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_ui_sees_the_kind_as_a_lowercase_word() {
+        let dir = TempDir::new("screenshots-json");
+        dir.touch("a.mp4", 1, 1);
+        dir.touch("b.png", 1, 2);
+        let json = serde_json::to_value(list_clips(&dir.0).unwrap()).unwrap();
+        assert_eq!(json[0]["kind"], "clip");
+        assert_eq!(json[1]["kind"], "screenshot");
+    }
+
+    #[test]
+    fn the_editor_only_gets_clips_but_everything_else_gets_both() {
+        let dir = Path::new("/clips");
+        assert!(
+            clip_path(dir, "captura-1.png").is_err(),
+            "a picture can't be trimmed"
+        );
+        assert_eq!(
+            media_path(dir, "captura-1.png").unwrap(),
+            dir.join("captura-1.png")
+        );
+        assert_eq!(media_path(dir, "clip.MP4").unwrap(), dir.join("clip.MP4"));
+        for bad in [
+            "",
+            "..",
+            "../a.png",
+            "sub/a.png",
+            "a\\b.png",
+            "a.txt",
+            "a.png.part",
+            "nul\0.png",
+        ] {
+            assert!(media_path(dir, bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn a_screenshot_keeps_its_extension_when_renamed() {
+        let dir = TempDir::new("screenshots-rename");
+        dir.touch("captura-1.png", 7, 1);
+        assert_eq!(
+            rename_clip(&dir.0, "captura-1.png", "Mi mejor momento").unwrap(),
+            "Mi mejor momento.png"
+        );
+        // Typing the extension doesn't double it, and an mp4 typed on a picture
+        // doesn't turn it into one.
+        assert_eq!(
+            rename_clip(&dir.0, "Mi mejor momento.png", "final.PNG").unwrap(),
+            "final.png"
+        );
+        assert_eq!(
+            rename_clip(&dir.0, "final.png", "final.mp4").unwrap(),
+            "final.png",
+            "same file name: nothing to do"
+        );
+        assert!(dir.0.join("final.png").exists());
+    }
+
+    #[test]
+    fn a_clip_and_a_screenshot_with_the_same_stem_do_not_clash() {
+        let dir = TempDir::new("screenshots-stem");
+        dir.touch("momento.mp4", 1, 1);
+        dir.touch("captura-1.png", 2, 1);
+        assert_eq!(
+            rename_clip(&dir.0, "captura-1.png", "momento").unwrap(),
+            "momento.png"
+        );
+        assert!(dir.0.join("momento.mp4").exists() && dir.0.join("momento.png").exists());
+    }
+
+    #[test]
+    fn a_screenshot_can_be_deleted_and_so_can_it_go_with_its_folder() {
+        let dir = TempDir::new("screenshots-delete");
+        let store = store_in(&dir);
+        let picture = dir.touch("captura-1.png", 1, 1);
+        let id = folder(&store, "Capturas", &["captura-1.png"]);
+        assert_eq!(
+            delete_folder(&dir.0, &store, &id, true).unwrap(),
+            ["captura-1.png"]
+        );
+        assert!(!picture.exists());
+
+        let other = dir.touch("captura-2.png", 1, 1);
+        delete_clip(&dir.0, "captura-2.png").unwrap();
+        assert!(!other.exists());
+    }
+
+    #[test]
+    fn stems_lose_a_png_suffix_too() {
+        assert_eq!(sanitize_stem("momento.png").unwrap(), "momento");
+        assert_eq!(sanitize_stem("momento.PNG").unwrap(), "momento");
+        assert_eq!(sanitize_stem("momento.jpg").unwrap(), "momento.jpg");
+        assert!(sanitize_stem(".png").is_err());
+        assert_eq!(
+            sanitize_stem("ñ.mp4").unwrap(),
+            "ñ",
+            "multi-byte names don't confuse the cut"
+        );
     }
 }
