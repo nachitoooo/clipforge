@@ -160,3 +160,115 @@ fn cpal_microphone_smoke() {
     }
     assert!(controls.error().is_none());
 }
+
+// ---- hearing what the computer plays ---------------------------------------------
+//
+// These need an audio output device. A CI runner has none until a virtual
+// cable is installed (the `windows-video` workflow does that).
+
+/// Write a stereo 16-bit 48 kHz WAV of a sine tone.
+fn write_tone_wav(path: &std::path::Path, seconds: u32, hz: f32, amplitude: f32) {
+    let rate = 48_000u32;
+    let frames = rate * seconds;
+    let mut pcm = Vec::with_capacity(frames as usize * 4);
+    for n in 0..frames {
+        let v = (amplitude
+            * (2.0 * std::f32::consts::PI * hz * n as f32 / rate as f32).sin()
+            * 32767.0) as i16;
+        pcm.extend(v.to_le_bytes());
+        pcm.extend(v.to_le_bytes());
+    }
+    let mut wav = Vec::new();
+    wav.extend(b"RIFF");
+    wav.extend((36 + pcm.len() as u32).to_le_bytes());
+    wav.extend(b"WAVEfmt ");
+    wav.extend(16u32.to_le_bytes());
+    wav.extend(1u16.to_le_bytes()); // PCM
+    wav.extend(2u16.to_le_bytes());
+    wav.extend(rate.to_le_bytes());
+    wav.extend((rate * 4).to_le_bytes());
+    wav.extend(4u16.to_le_bytes());
+    wav.extend(16u16.to_le_bytes());
+    wav.extend(b"data");
+    wav.extend((pcm.len() as u32).to_le_bytes());
+    wav.extend(pcm);
+    std::fs::write(path, wav).unwrap();
+}
+
+/// Play `path` through the default output device, from another process.
+fn play_in_background(path: &std::path::Path) -> std::process::Child {
+    std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "(New-Object Media.SoundPlayer '{}').PlaySync()",
+                path.display()
+            ),
+        ])
+        .spawn()
+        .expect("powershell plays the tone")
+}
+
+/// How loud `hz` is in interleaved samples, as a sine amplitude (0..1).
+fn amplitude_at(samples: &[f32], channels: usize, rate: f32, hz: f32) -> f32 {
+    let (mut re, mut im, mut n) = (0f64, 0f64, 0usize);
+    for (i, frame) in samples.chunks_exact(channels).enumerate() {
+        let mono = frame.iter().sum::<f32>() / channels as f32;
+        let phase = 2.0 * std::f64::consts::PI * f64::from(hz) * i as f64 / f64::from(rate);
+        re += f64::from(mono) * phase.cos();
+        im += f64::from(mono) * phase.sin();
+        n += 1;
+    }
+    (2.0 * (re * re + im * im).sqrt() / n.max(1) as f64) as f32
+}
+
+#[test]
+#[ignore = "needs a Windows audio output device"]
+fn loopback_hears_a_tone_that_is_playing_with_sane_timestamps() {
+    let dir = std::env::temp_dir().join("clipforge-loopback");
+    std::fs::create_dir_all(&dir).unwrap();
+    let wav = dir.join("tone-440.wav");
+    write_tone_wav(&wav, 4, 440.0, 0.5);
+
+    let epoch = SharedEpoch::new();
+    epoch.get_or_set(qpc_now_ns());
+    let mut source = WasapiLoopbackSource::new(AudioConfig::default(), epoch);
+    let mut rx = source.start().expect("loopback stream starts");
+    let mut player = play_in_background(&wav);
+
+    std::thread::sleep(Duration::from_millis(3500));
+    source.stop();
+    let _ = player.kill();
+    let _ = player.wait();
+    let mut chunks = Vec::new();
+    while let Ok(chunk) = rx.try_recv() {
+        chunks.push(chunk);
+    }
+    println!("loopback delivered {} chunks in 3.5 s", chunks.len());
+    assert!(
+        chunks.len() > 100,
+        "{} chunks: nothing was heard",
+        chunks.len()
+    );
+
+    for pair in chunks.windows(2) {
+        assert!(
+            pair[1].timestamp >= pair[0].timestamp,
+            "timestamps must not go back"
+        );
+    }
+    // The loudest second of what was heard is the tone.
+    let loud: Vec<f32> = chunks
+        .iter()
+        .flat_map(|c| c.samples.iter().copied())
+        .collect();
+    let at_440 = amplitude_at(&loud, 2, 48_000.0, 440.0);
+    let at_1000 = amplitude_at(&loud, 2, 48_000.0, 1000.0);
+    println!("amplitude at 440 Hz {at_440:.3}, at 1000 Hz {at_1000:.3}");
+    assert!(at_440 > 0.02, "the 440 Hz tone is too quiet: {at_440}");
+    assert!(
+        at_440 > at_1000 * 10.0,
+        "440 Hz should dominate 1 kHz: {at_440} vs {at_1000}"
+    );
+}

@@ -32,6 +32,24 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # A runner has no sound card. A virtual audio cable gives it an output
+      # device (what "the computer plays" is captured from) and an input device
+      # (a microphone that hears whatever is played). The publisher is trusted
+      # first, or Windows asks a question in a window nobody can click.
+      - name: Install a virtual audio cable
+        shell: powershell
+        run: |
+          choco install vb-cable -y --no-progress | Out-Null
+          $dir = "C:\ProgramData\chocolatey\lib\vb-cable\tools"
+          $sig = Get-AuthenticodeSignature (Get-ChildItem $dir -Filter "*.cat" | Select-Object -First 1).FullName
+          $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPublisher","LocalMachine")
+          $store.Open("ReadWrite"); $store.Add($sig.SignerCertificate); $store.Close()
+          $p = Start-Process -FilePath "$dir\VBCABLE_Setup_x64.exe" -ArgumentList "-i","-h" -PassThru
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; "cable setup timed out" }
+          Start-Sleep -Seconds 8
+          Get-PnpDevice -Class AudioEndpoint | Format-Table FriendlyName, Status -AutoSize
+          exit 0
+
       # Release build: the real app is one, and speed is what is being measured.
       # Each test runs in a process of its own, so one that crashes the process
       # cannot hide the results of the others.
@@ -59,11 +77,8 @@ jobs:
         shell: bash
         run: cargo test --release -p clipforge-core --test windows_misc -- --ignored --nocapture --test-threads=1
 
-      # A runner has no sound card and no microphone, so the WASAPI and
-      # microphone tests are expected to fail here; the AAC ones must pass.
-      - name: Audio tests (AAC encoder; WASAPI and microphone need real devices)
+      - name: Audio tests (AAC encoder, system sound, microphone)
         if: always()
-        continue-on-error: true
         shell: bash
         run: cargo test --release -p clipforge-core --test windows_audio -- --ignored --nocapture --test-threads=1
 

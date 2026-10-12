@@ -606,3 +606,229 @@ fn a_still_screen_still_gives_a_first_frame() {
     );
     assert_eq!(data.len(), width as usize * height as usize * 4);
 }
+
+// ---- the recorder, with the sound of the computer -----------------------------------
+
+/// What Windows' decoder makes of the first audio track: 16-bit PCM samples,
+/// interleaved, with their rate and channel count.
+struct DecodedAudio {
+    sample_rate: u32,
+    channels: u32,
+    samples: Vec<i16>,
+}
+
+fn decode_audio_with_windows(path: &Path) -> DecodedAudio {
+    use windows::Win32::Media::MediaFoundation::{
+        MFAudioFormat_PCM, MFMediaType_Audio, MF_MT_AUDIO_NUM_CHANNELS,
+        MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+    };
+    // SAFETY: plain Media Foundation calls; everything is dropped before MFShutdown.
+    unsafe {
+        MFStartup(MF_VERSION, MFSTARTUP_FULL).expect("MFStartup");
+        let decode = || {
+            let reader = MFCreateSourceReaderFromURL(&HSTRING::from(path.as_os_str()), None)
+                .expect("Windows can open the mp4");
+            let stream = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
+            let wanted = MFCreateMediaType().unwrap();
+            wanted
+                .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)
+                .unwrap();
+            wanted.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM).unwrap();
+            reader
+                .SetCurrentMediaType(stream, None, &wanted)
+                .expect("Windows can decode the AAC track");
+            let current = reader.GetCurrentMediaType(stream).unwrap();
+            let sample_rate = current.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap();
+            let channels = current.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).unwrap();
+            let mut samples = Vec::new();
+            loop {
+                let (mut flags, mut sample) = (0u32, None);
+                reader
+                    .ReadSample(stream, 0, None, Some(&mut flags), None, Some(&mut sample))
+                    .expect("read decoded audio");
+                if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                    break;
+                }
+                let Some(sample) = sample else { continue };
+                let buffer = sample.ConvertToContiguousBuffer().unwrap();
+                let (mut ptr, mut len) = (std::ptr::null_mut(), 0u32);
+                buffer.Lock(&mut ptr, None, Some(&mut len)).unwrap();
+                let bytes = std::slice::from_raw_parts(ptr, len as usize);
+                samples.extend(
+                    bytes
+                        .chunks_exact(2)
+                        .map(|b| i16::from_le_bytes([b[0], b[1]])),
+                );
+                buffer.Unlock().unwrap();
+            }
+            DecodedAudio {
+                sample_rate,
+                channels,
+                samples,
+            }
+        };
+        let decoded = decode();
+        let _ = MFShutdown();
+        decoded
+    }
+}
+
+fn tone_amplitude(audio: &DecodedAudio, hz: f32) -> f32 {
+    let (mut re, mut im, mut n) = (0f64, 0f64, 0usize);
+    for (i, frame) in audio
+        .samples
+        .chunks_exact(audio.channels as usize)
+        .enumerate()
+    {
+        let mono =
+            frame.iter().map(|&s| f64::from(s) / 32768.0).sum::<f64>() / f64::from(audio.channels);
+        let phase =
+            2.0 * std::f64::consts::PI * f64::from(hz) * i as f64 / f64::from(audio.sample_rate);
+        re += mono * phase.cos();
+        im += mono * phase.sin();
+        n += 1;
+    }
+    (2.0 * (re * re + im * im).sqrt() / n.max(1) as f64) as f32
+}
+
+#[test]
+#[ignore = "needs a Windows desktop session, an audio output device and the Media Foundation encoders"]
+fn the_recorder_saves_a_clip_with_the_sound_that_was_playing() {
+    let (screen_w, screen_h) = primary_display_size().expect("primary display");
+    let (width, height) = fit_even(screen_w, screen_h, 1920, 1080);
+    let config = EncoderConfig {
+        width,
+        height,
+        bitrate: 8_000_000,
+        ..EncoderConfig::default()
+    };
+
+    // a 440 Hz tone, played by another process into the default output device
+    let wav = out_dir().join("tone-440.wav");
+    {
+        let rate = 48_000u32;
+        let mut pcm = Vec::new();
+        for n in 0..rate * 8 {
+            let v = (0.5
+                * (2.0 * std::f32::consts::PI * 440.0 * n as f32 / rate as f32).sin()
+                * 32767.0) as i16;
+            pcm.extend(v.to_le_bytes());
+            pcm.extend(v.to_le_bytes());
+        }
+        let mut file = Vec::new();
+        file.extend(b"RIFF");
+        file.extend((36 + pcm.len() as u32).to_le_bytes());
+        file.extend(b"WAVEfmt ");
+        file.extend(16u32.to_le_bytes());
+        file.extend([1, 0, 2, 0]);
+        file.extend(rate.to_le_bytes());
+        file.extend((rate * 4).to_le_bytes());
+        file.extend([4, 0, 16, 0]);
+        file.extend(b"data");
+        file.extend((pcm.len() as u32).to_le_bytes());
+        file.extend(pcm);
+        std::fs::write(&wav, file).unwrap();
+    }
+
+    let epoch = SharedEpoch::new();
+    let video = WindowsGraphicsCaptureSource::new(
+        WindowsCaptureConfig {
+            width,
+            height,
+            fps: config.fps,
+            show_cursor: true,
+        },
+        epoch.clone(),
+    );
+    let audio = clipforge_core::audio::wasapi::WasapiLoopbackSource::new(
+        clipforge_core::audio::AudioConfig::default(),
+        epoch,
+    );
+    let source = WithAudio::new(video, audio);
+    let encoder = MediaFoundationEncoder::new(config).expect("H.264 encoder MFT");
+    let audio_encoder: Box<dyn clipforge_core::audio::AudioEncoder> = Box::new(
+        clipforge_core::audio::aac_mediafoundation::MediaFoundationAacEncoder::new(
+            clipforge_core::audio::AudioConfig::default(),
+        )
+        .expect("AAC encoder"),
+    );
+
+    let mut engine = CaptureEngine::new(BufferConfig::default());
+    let clips = Arc::new(ClipService::new(
+        engine.buffer(),
+        out_dir().join("clips-with-sound"),
+    ));
+    engine
+        .start_with_audio(
+            Box::new(source),
+            Box::new(encoder),
+            Some(audio_encoder),
+            Arc::clone(&clips),
+        )
+        .expect("the engine starts");
+    let mut player = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "(New-Object Media.SoundPlayer '{}').PlaySync()",
+                wav.display()
+            ),
+        ])
+        .spawn()
+        .expect("powershell plays the tone");
+
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let wiggler = wiggle_cursor(Arc::clone(&stop), (screen_w, screen_h));
+    std::thread::sleep(Duration::from_secs(6));
+    let saved = clips
+        .save_last(Duration::from_secs(4))
+        .expect("a clip is saved");
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    wiggler.join().unwrap();
+    let _ = player.kill();
+    let _ = player.wait();
+    engine.stop();
+
+    let stats = engine.stats();
+    eprintln!("engine {stats:?}");
+    eprintln!(
+        "saved {} ({} video packets, {} audio packets, {:?})",
+        saved.path.display(),
+        saved.packets,
+        saved.audio_packets,
+        saved.duration
+    );
+    assert_eq!(stats.encode_errors, 0);
+    assert_eq!(stats.audio_errors, 0);
+    assert!(
+        saved.audio_packets > 100,
+        "{} audio packets: the sound was not recorded",
+        saved.audio_packets
+    );
+
+    let video = decode_with_windows(&saved.path);
+    assert_eq!(video.frames, saved.packets as u64);
+    let sound = decode_audio_with_windows(&saved.path);
+    let seconds =
+        sound.samples.len() as f64 / f64::from(sound.channels) / f64::from(sound.sample_rate);
+    let (at_440, at_1000) = (
+        tone_amplitude(&sound, 440.0),
+        tone_amplitude(&sound, 1000.0),
+    );
+    eprintln!(
+        "windows decoded audio: {} Hz x{}, {seconds:.2} s; 440 Hz {at_440:.3}, 1 kHz {at_1000:.3}; video {:?}",
+        sound.sample_rate, sound.channels, video.duration
+    );
+    assert_eq!(sound.sample_rate, 48_000);
+    assert!(
+        (seconds - saved.duration.as_secs_f64()).abs() < 0.3,
+        "the sound lasts {seconds:.2} s, the clip {:?}",
+        saved.duration
+    );
+    assert!(at_440 > 0.02, "the tone is not in the clip: {at_440}");
+    assert!(
+        at_440 > at_1000 * 10.0,
+        "440 Hz should dominate: {at_440} vs {at_1000}"
+    );
+}
