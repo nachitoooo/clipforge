@@ -843,11 +843,12 @@ fn the_recorder_saves_a_clip_with_the_sound_that_was_playing() {
 /// hands the clip it wrote to this test: `CLIPFORGE_APP_CLIP` is its path and
 /// `CLIPFORGE_EXPECT_TONE` (Hz, optional) the tone that was playing meanwhile.
 #[test]
-#[ignore = "needs CLIPFORGE_APP_CLIP: a clip saved by the app"]
+#[ignore = "checks a clip saved by the app; does nothing without CLIPFORGE_APP_CLIP"]
 fn a_clip_saved_by_the_app_plays_in_windows() {
-    let path = PathBuf::from(
-        std::env::var_os("CLIPFORGE_APP_CLIP").expect("CLIPFORGE_APP_CLIP is the clip's path"),
-    );
+    let Some(path) = std::env::var_os("CLIPFORGE_APP_CLIP").map(PathBuf::from) else {
+        eprintln!("skipped: CLIPFORGE_APP_CLIP is not set (the windows-app workflow sets it)");
+        return;
+    };
     let size = std::fs::metadata(&path).expect("the clip exists").len();
     let video = decode_with_windows(&path);
     eprintln!(
