@@ -22,11 +22,18 @@ jobs:
       - name: Run the driver setup
         shell: powershell
         run: |
-          Get-ChildItem C:\ProgramData\chocolatey\lib\vb-cable\tools | Format-Table Name, Length
-          $setup = "C:\ProgramData\chocolatey\lib\vb-cable\tools\VBCABLE_Setup_x64.exe"
-          $p = Start-Process -FilePath $setup -ArgumentList "-i","-h" -Wait -PassThru
-          "setup exit code: $($p.ExitCode)"
-          Get-Content C:\Windows\INF\setupapi.dev.log -Tail 40 -ErrorAction SilentlyContinue
+          $dir = "C:\ProgramData\chocolatey\lib\vb-cable\tools"
+          Get-ChildItem $dir | Format-Table Name, Length
+          # Trust the publisher first, or Windows asks "install this device software?"
+          # in a window nobody can click.
+          $cat = Get-ChildItem $dir -Filter "*.cat" | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $cat.FullName
+          "catalog: $($cat.Name) signed by $($sig.SignerCertificate.Subject)"
+          $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPublisher","LocalMachine")
+          $store.Open("ReadWrite"); $store.Add($sig.SignerCertificate); $store.Close()
+          $p = Start-Process -FilePath "$dir\VBCABLE_Setup_x64.exe" -ArgumentList "-i","-h" -PassThru
+          if (-not $p.WaitForExit(90000)) { "setup still running after 90 s: killing it"; Stop-Process -Id $p.Id -Force }
+          else { "setup exit code: $($p.ExitCode)" }
           exit 0
       - name: Audio endpoints after
         shell: powershell
