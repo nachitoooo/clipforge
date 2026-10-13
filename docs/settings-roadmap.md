@@ -18,8 +18,10 @@ surprises, and the settings planned next (in the order we would build them).
 | Extra save shortcuts (up to 4, each with its own length) | `settings.shortcuts.extraSaveClip` (`[{ accelerator, seconds }]`) | live: registered with the others, all or nothing (`shortcuts.rs`); a length change registers nothing |
 | File each clip in a folder named after its game | `settings.library.autoFolders` (default off) | read when the clip is saved; needs `detectGame` |
 | Screenshot shortcut (optional) | `settings.shortcuts.screenshot` (empty = none, the default) | live: registered with the others, all or nothing; the tray entry shows it |
-| Low RAM mode (1 min of buffer at 6 Mb/s instead of 2 min at 12 Mb/s: ~45 MB instead of ~180 MB) | `settings.performance.lowRam` (default off) | **restarts the video capture** and empties the buffer: the UI asks first; both numbers live in `memory.rs` |
+| Replay buffer length (follows the longest save shortcut + 4 s: 34 s, ~50 MB, with the usual 30 s clip; never more than 2 min) | derived from `settings.shortcuts.clipSeconds` and `extraSaveClip[].seconds` (`Settings::longest_clip_seconds`, `memory::MemoryPlan::sized_for`) | live: `Recorder::apply_live_controls` resizes the eviction window when a clip length changes; shorter frees RAM at once, longer fills over time. The Rendimiento panel shows the real figure |
+| Low RAM mode (half the bitrate, 6 Mb/s instead of 12, and a buffer of at most 1 min instead of 2) | `settings.performance.lowRam` (default off) | **restarts the video capture** and empties the buffer: the UI asks first; the numbers live in `memory.rs` |
 | Theme (system / dark / light) and the main color (`#rrggbb`) | `settings.appearance.theme` (default `dark`), `settings.appearance.accent` (default `#ff7a1a`) | live: `update_settings` emits `settings-changed` and `ui/appearance.ts` writes `data-theme` and the accent properties on the root element; never restarts anything. Unknown values go back to the default in `Settings::validated` |
+| Copy each saved clip to the clipboard | `settings.library.copyOnSave` (default off: it replaces what was copied) | read when the clip is saved (hotkey, tray or button): the file is put on the clipboard and the notification says «copiado al portapapeles», or why it could not. Screenshots are not copied |
 | Detect the game when a clip is saved | `settings.library.detectGame` (default on) | live: an atomic shared with the activity tracker; off stops the lookup and forgets what it saw |
 
 ## How to add a setting
@@ -75,7 +77,7 @@ order, not a promise.
 
 | Setting | Why | Effort | Notes |
 |---|---|---|---|
-| Buffer length (60 / 120 / 180 s) | History vs. RAM | S | `BufferConfig`; restarting the buffer loses what's recorded. *Low RAM mode* already switches between 120 s and 60 s (`ReplayBuffer::set_config` exists); a free choice is the same plumbing |
+| Buffer length (60 / 120 / 180 s) | History vs. RAM | S | Built the other way round: the length is derived from the clips (see *Today*), so it needs no setting. A longer-than-clip history (say 5 min kept just to be safe) would be an override on top of `memory::MemoryPlan::sized_for` |
 | ~~Default clip length (15 / 30 / 60 / 120 s)~~ | Done (2026-10-12): see *Today*, together with the extra save shortcuts | S | `settings.shortcuts.clipSeconds` |
 | Clips folder | Fixed at `~/Movies/ClipForge` | S | The `asset` protocol scope in `tauri.conf.json` must follow it |
 | Launch at login | Buffer already running when you play | S | Autostart plugin |
@@ -147,7 +149,7 @@ capture needs the "buffer will be emptied" warning.
 
 | Idea | Why | Effort | Notes |
 |---|---|---|---|
-| After saving: open folder / copy to clipboard / nothing | Paste the clip into chat in one step | S | Copying a clip is built (F-3.12, from its card and the player): this would run it automatically after a save, as a setting |
+| After saving: open folder / nothing | Look at the clip at once | S | Copying after a save is built (`library.copyOnSave`, F-3.17); opening the folder is not |
 | Start minimized to the tray | With launch at login, don't open the window | S | Goes with the autostart setting |
 | Configurable shortcuts for everything (open app, pause, mark) | One place for every shortcut | M | Generalizes the key recorder in `lib/hotkey.ts` |
 | Check for updates / beta channel | The app keeps itself current | M | Tauri updater; needs signing and hosting |

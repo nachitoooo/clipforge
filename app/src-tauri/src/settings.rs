@@ -145,6 +145,9 @@ pub struct LibrarySettings {
     /// there is none). Off by default: it creates folders. It needs the game, so
     /// it does nothing while `detect_game` is off.
     pub auto_folders: bool,
+    /// Put each saved clip on the system clipboard as a file, ready to paste in a
+    /// chat or a mail. Off by default: it replaces whatever was copied before.
+    pub copy_on_save: bool,
 }
 
 impl Default for LibrarySettings {
@@ -152,6 +155,7 @@ impl Default for LibrarySettings {
         Self {
             detect_game: true,
             auto_folders: false,
+            copy_on_save: false,
         }
     }
 }
@@ -279,6 +283,16 @@ fn parse_shortcut(accelerator: &str) -> Result<Shortcut, String> {
 }
 
 impl Settings {
+    /// The longest clip any save shortcut asks for, in seconds: what the replay
+    /// buffer has to be able to hold (`memory::MemoryPlan::sized_for`).
+    pub fn longest_clip_seconds(&self) -> u64 {
+        self.shortcuts
+            .extra_save_clip
+            .iter()
+            .map(|extra| extra.seconds)
+            .fold(self.shortcuts.clip_seconds, u64::max)
+    }
+
     /// Whether going from `old` to `new` needs the video capture restarted — which
     /// empties the replay buffer, so the UI warns before it happens. Everything
     /// else is applied live.
@@ -497,6 +511,10 @@ mod tests {
             !s.library.auto_folders,
             "making folders by itself is opt-in"
         );
+        assert!(
+            !s.library.copy_on_save,
+            "replacing the clipboard by itself is opt-in"
+        );
     }
 
     #[test]
@@ -533,6 +551,64 @@ mod tests {
 
         let json = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(json["library"]["autoFolders"], false);
+    }
+
+    #[test]
+    fn the_longest_clip_is_the_longest_of_all_the_shortcuts() {
+        let mut s = Settings::default();
+        assert_eq!(s.longest_clip_seconds(), DEFAULT_CLIP_SECONDS);
+        s.shortcuts.clip_seconds = 20;
+        assert_eq!(s.longest_clip_seconds(), 20);
+        s.shortcuts.extra_save_clip = vec![
+            ClipShortcut {
+                accelerator: "F9".into(),
+                seconds: 15,
+            },
+            ClipShortcut {
+                accelerator: "F10".into(),
+                seconds: 90,
+            },
+        ];
+        assert_eq!(
+            s.longest_clip_seconds(),
+            90,
+            "an extra shortcut can be the longest"
+        );
+        s.shortcuts.clip_seconds = 120;
+        assert_eq!(s.longest_clip_seconds(), 120, "and so can the main one");
+    }
+
+    #[test]
+    fn copying_on_save_can_be_switched_on_and_stays_on() {
+        let dir = TempDir::new("copy-on-save-on");
+        let store = SettingsStore::load(dir.file());
+        let mut s = Settings::default();
+        s.library.copy_on_save = true;
+        store.replace(s.validated().unwrap()).unwrap();
+        let reloaded = SettingsStore::load(dir.file()).get();
+        assert!(reloaded.library.copy_on_save);
+        assert!(
+            reloaded.library.detect_game,
+            "the other switches are untouched"
+        );
+        assert!(!reloaded.library.auto_folders);
+    }
+
+    #[test]
+    fn a_library_section_from_before_copying_gets_it_off() {
+        let dir = TempDir::new("copy-on-save-old");
+        fs::write(
+            dir.file(),
+            r#"{"library":{"detectGame":false,"autoFolders":true}}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.file()).get();
+        assert!(!s.library.detect_game);
+        assert!(s.library.auto_folders);
+        assert!(!s.library.copy_on_save);
+
+        let json = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(json["library"]["copyOnSave"], false);
     }
 
     #[test]
@@ -1315,6 +1391,7 @@ mod tests {
         other.shortcuts.clip_seconds = 60;
         other.shortcuts.screenshot = "F8".into();
         other.library.auto_folders = true;
+        other.library.copy_on_save = true;
         assert!(!Settings::needs_capture_restart(&off, &other));
     }
 }

@@ -54,7 +54,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clipmeta::ClipMetaStore;
-use dispatch::{dispatch, Actions, Command, MuteOutcome};
+use dispatch::{dispatch, saved_description, Actions, Command, CopyOutcome, MuteOutcome};
 use folders::{FolderDraft, FolderInfo, FolderStore};
 use mic::{MicDevice, MicStatus};
 use recorder::{BufferStatus, Recorder};
@@ -224,7 +224,16 @@ impl Actions for AppActions {
         let name = file_name_of(&saved.path);
         // The game is whatever held the screen for most of the clip.
         self.register_new_file(&name, seconds);
-        Ok(format!("{:.0} s → {name}", saved.duration.as_secs_f64()))
+        // With copying on, the clip is on the clipboard by the time the
+        // notification shows, so it can be pasted straight away.
+        let copy = CopyOutcome::attempt(self.settings().get().library.copy_on_save, || {
+            clipforge_core::clipboard::copy_file(&saved.path)
+        });
+        Ok(saved_description(
+            saved.duration.as_secs_f64(),
+            &name,
+            &copy,
+        ))
     }
 
     fn take_screenshot(&self) -> Result<String, String> {
@@ -598,10 +607,11 @@ async fn trim_clip(
     Ok(result)
 }
 
-/// What each memory mode costs, for the settings screen.
+/// What each memory mode costs with the clips set in Settings, for the settings
+/// screen.
 #[tauri::command]
-fn memory_plans() -> memory::Plans {
-    memory::plans()
+fn memory_plans(store: tauri::State<'_, Arc<SettingsStore>>) -> memory::Plans {
+    memory::plans(store.get().longest_clip_seconds())
 }
 
 #[tauri::command]

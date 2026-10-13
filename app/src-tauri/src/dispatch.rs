@@ -40,6 +40,40 @@ impl Command {
     }
 }
 
+/// What became of the clipboard when a clip was saved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CopyOutcome {
+    /// Copying on save is switched off.
+    NotAsked,
+    Copied,
+    Failed(String),
+}
+
+impl CopyOutcome {
+    /// Run `copy` only when the setting asks for it. A clip that could not be
+    /// copied is still a saved clip: the failure is reported, never raised.
+    pub fn attempt(asked: bool, copy: impl FnOnce() -> Result<(), String>) -> Self {
+        if !asked {
+            return Self::NotAsked;
+        }
+        match copy() {
+            Ok(()) => Self::Copied,
+            Err(reason) => Self::Failed(reason),
+        }
+    }
+}
+
+/// What the "clip saved" notification says: the length and the file, then what
+/// happened to the clipboard if it was asked to take the clip.
+pub fn saved_description(seconds: f64, name: &str, copy: &CopyOutcome) -> String {
+    let saved = format!("{seconds:.0} s → {name}");
+    match copy {
+        CopyOutcome::NotAsked => saved,
+        CopyOutcome::Copied => format!("{saved} · copiado al portapapeles"),
+        CopyOutcome::Failed(reason) => format!("{saved} · no se pudo copiar: {reason}"),
+    }
+}
+
 /// Side effects the dispatcher can request — implemented by the real app,
 /// mocked in tests.
 pub trait Actions {
@@ -173,6 +207,47 @@ mod tests {
         );
         assert_eq!(Command::from_menu_id("quit"), Some(Command::Quit));
         assert_eq!(Command::from_menu_id("unknown"), None);
+    }
+
+    #[test]
+    fn the_clipboard_is_left_alone_unless_asked() {
+        let mut touched = false;
+        let outcome = CopyOutcome::attempt(false, || {
+            touched = true;
+            Ok(())
+        });
+        assert_eq!(outcome, CopyOutcome::NotAsked);
+        assert!(!touched, "switched off: the copy must not even run");
+    }
+
+    #[test]
+    fn a_copy_that_works_is_reported_as_copied() {
+        assert_eq!(CopyOutcome::attempt(true, || Ok(())), CopyOutcome::Copied);
+    }
+
+    #[test]
+    fn a_copy_that_fails_keeps_its_reason_instead_of_failing_the_save() {
+        assert_eq!(
+            CopyOutcome::attempt(true, || Err("el clip ya no existe".into())),
+            CopyOutcome::Failed("el clip ya no existe".into())
+        );
+    }
+
+    #[test]
+    fn the_notification_names_the_clip_and_what_happened_to_the_clipboard() {
+        let plain = saved_description(29.6, "clip.mp4", &CopyOutcome::NotAsked);
+        assert_eq!(plain, "30 s → clip.mp4");
+        assert_eq!(
+            saved_description(30.0, "clip.mp4", &CopyOutcome::Copied),
+            "30 s → clip.mp4 · copiado al portapapeles"
+        );
+        let failed =
+            saved_description(30.0, "clip.mp4", &CopyOutcome::Failed("sin permiso".into()));
+        assert!(failed.starts_with("30 s → clip.mp4"), "{failed}");
+        assert!(
+            failed.contains("no se pudo copiar: sin permiso"),
+            "{failed}"
+        );
     }
 
     #[test]

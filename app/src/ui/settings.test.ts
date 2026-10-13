@@ -56,8 +56,8 @@ let createSettings: SettingsModule["createSettings"];
 const mounted: { onHide(): void }[] = [];
 
 const PLANS: MemoryPlans = {
-  normal: { bufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 180_000_000 },
-  lowRam: { bufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 45_000_000 },
+  normal: { bufferSeconds: 34, maxBufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 51_000_000 },
+  lowRam: { bufferSeconds: 34, maxBufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 25_500_000 },
 };
 
 async function mount(
@@ -843,10 +843,30 @@ describe("low RAM mode", () => {
     await mount();
     expect(lowRamSwitch().checked).toBe(false);
     const text = panel().textContent;
-    expect(text).toContain("Ahora: 2 min de buffer a 12 Mb/s (unos 180 MB de RAM)");
-    expect(text).toContain("Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM)");
-    expect(text).toContain("clips de hasta 1 min");
+    expect(text).toContain("Ahora: 34 s de buffer a 12 Mb/s (unos 51 MB de RAM)");
+    expect(text).toContain("Activado: 34 s de buffer a 6 Mb/s (unos 26 MB de RAM)");
     expect(text).toContain("reinicia la grabación y vacía el buffer");
+  });
+
+  it("says the buffer follows the longest clip", async () => {
+    await mount();
+    expect(panel().textContent).toContain("solo lo que necesita tu clip más largo");
+  });
+
+  it("asks again what each mode costs once a clip length is saved", async () => {
+    await mount();
+    expect(api.memoryPlans).toHaveBeenCalledTimes(1);
+    api.memoryPlans.mockResolvedValue({
+      normal: { bufferSeconds: 94, maxBufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 141_000_000 },
+      lowRam: { bufferSeconds: 60, maxBufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 45_000_000 },
+    });
+    const length = q<HTMLSelectElement>('select[aria-label="Duración del clip"]');
+    length.value = "90";
+    length.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    expect(api.memoryPlans).toHaveBeenCalledTimes(2);
+    expect(panel().textContent).toContain("Ahora: 1 min 34 s de buffer a 12 Mb/s (unos 141 MB de RAM)");
   });
 
   it("asks before it changes anything, because it empties the buffer", async () => {
@@ -886,7 +906,7 @@ describe("low RAM mode", () => {
     await mount(withLowRam(true));
     expect(lowRamSwitch().checked).toBe(true);
     expect(panel().textContent).toContain(
-      "Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM) en vez de 2 min de buffer a 12 Mb/s",
+      "Activado: 34 s de buffer a 6 Mb/s (unos 26 MB de RAM) en vez de 34 s de buffer a 12 Mb/s",
     );
     flip(false);
     await settle();
@@ -965,9 +985,9 @@ describe("the library section", () => {
     q<HTMLInputElement>('input[aria-label="Detectar el juego al guardar un clip"]');
   const libraryPanel = () => q<HTMLElement>('[aria-labelledby="library-title"]');
 
-  function libSettings(detectGame: boolean, autoFolders = false): Settings {
+  function libSettings(detectGame: boolean, autoFolders = false, copyOnSave = false): Settings {
     const s = defaultSettings();
-    return { ...s, library: { detectGame, autoFolders } };
+    return { ...s, library: { detectGame, autoFolders, copyOnSave } };
   }
 
   const autoSwitch = () =>
@@ -993,7 +1013,7 @@ describe("the library section", () => {
     await settle();
     expect(api.updateSettings).toHaveBeenCalledTimes(1);
     const saved = lastSaved();
-    expect(saved.library).toEqual({ detectGame: true, autoFolders: true });
+    expect(saved.library).toEqual({ detectGame: true, autoFolders: true, copyOnSave: false });
     expect(saved.microphone).toEqual(defaultSettings().microphone);
     expect(saved.shortcuts).toEqual(defaultSettings().shortcuts);
   });
@@ -1003,8 +1023,40 @@ describe("the library section", () => {
     expect(autoSwitch().checked).toBe(true);
     flip(detectSwitch(), false);
     await settle();
-    expect(lastSaved().library).toEqual({ detectGame: false, autoFolders: true });
+    expect(lastSaved().library).toEqual({ detectGame: false, autoFolders: true, copyOnSave: false });
     expect(autoSwitch().checked).toBe(true);
+  });
+
+  const copySwitch = () =>
+    q<HTMLInputElement>('input[aria-label="Copiar cada clip al portapapeles al guardarlo"]');
+
+  it("copying on save is off by default and says what it replaces", async () => {
+    await mount();
+    expect(copySwitch().checked).toBe(false);
+    expect(copySwitch().disabled).toBe(false);
+    const text = libraryPanel().textContent;
+    expect(text).toContain("Reemplaza lo que tuvieras copiado");
+    expect(text).toContain("Las capturas de pantalla no se copian");
+  });
+
+  it("switching copying on saves at once and changes nothing else", async () => {
+    await mount();
+    flip(copySwitch(), true);
+    await settle();
+    expect(api.updateSettings).toHaveBeenCalledTimes(1);
+    const saved = lastSaved();
+    expect(saved.library).toEqual({ detectGame: true, autoFolders: false, copyOnSave: true });
+    expect(saved.microphone).toEqual(defaultSettings().microphone);
+    expect(saved.shortcuts).toEqual(defaultSettings().shortcuts);
+  });
+
+  it("shows the saved choice and does not depend on game detection", async () => {
+    await mount(libSettings(false, false, true));
+    expect(copySwitch().checked).toBe(true);
+    expect(copySwitch().disabled).toBe(false);
+    flip(copySwitch(), false);
+    await settle();
+    expect(lastSaved().library).toEqual({ detectGame: false, autoFolders: false, copyOnSave: false });
   });
 
   it("is unavailable, and says why, while the game is not being detected", async () => {

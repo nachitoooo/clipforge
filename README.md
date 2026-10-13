@@ -20,8 +20,9 @@ say how to get past that.
 
 ## What it does today
 
-- **Replay buffer** that keeps *encoded* frames (about 100 MB for two minutes of
-  1080p60), so saving a clip is a remux, never a re-encode.
+- **Replay buffer** that keeps *encoded* frames, so saving a clip is a remux, never
+  a re-encode. It is only as long as your longest clip needs (about 50 MB of RAM
+  for the usual 30 s at 1080p60, not a fixed two minutes).
 - **Global hotkeys**, configurable: one for the main clip length, up to four more
   with a length of their own (say F9 for the last 15 s, F10 for the last minute),
   plus mute for the microphone.
@@ -35,9 +36,10 @@ say how to get past that.
   switched off).
 - **Screenshots** of the screen (a hotkey you choose, the tray or a button), kept in
   the same library as the clips. macOS for now.
-- **Copy** a clip or a screenshot to paste it in Discord, Mail and so on.
-- **Low RAM mode** (Settings → Rendimiento): one minute of buffer at half the
-  bitrate, about a quarter of the memory.
+- **Copy** a clip or a screenshot to paste it in Discord, Mail and so on, or let
+  every new clip be copied by itself when it is saved (a setting, off by default).
+- **Low RAM mode** (Settings → Rendimiento): half the bitrate, so the buffer takes
+  half the memory again.
 - **Light or dark** interface (or the system's) and a main color of your choice.
 - Lives in the tray; nothing is ever uploaded anywhere.
 

@@ -9,6 +9,7 @@ import { openEditor } from "./editor";
 import { openFolderPicker } from "./folderpicker";
 import { openGameDialog } from "./gamedialog";
 import { icons } from "./icons";
+import { createLazyVideos } from "./lazyvideo";
 import { confirmDialog } from "./modal";
 import { openPlayer } from "./player";
 import { copyClip } from "./share";
@@ -79,17 +80,8 @@ export function createClipCards(options: ClipCardsOptions): ClipCards {
   let renaming = false;
   const cache = new Map<string, { signature: string; el: HTMLElement; video: HTMLVideoElement | null }>();
 
-  const lazyVideos = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        const video = entry.target as HTMLVideoElement;
-        lazyVideos.unobserve(video);
-        video.src = video.dataset.src ?? "";
-      }
-    },
-    { root: null, rootMargin: "400px" },
-  );
+  // Thumbnails load as they come near the screen and unload when far behind.
+  const lazyVideos = createLazyVideos();
 
   /** The folders a clip is in, as small colored labels (the first ones; the rest in a tooltip). */
   function chips(clip: ClipInfo): HTMLElement | null {

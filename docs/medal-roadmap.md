@@ -22,6 +22,7 @@ orden se decide al empezar cada uno.
 | **Atajos con distinta duración**: la duración del atajo principal y hasta 4 atajos más | F-3.5 |
 | **Carpeta automática por juego** (ajuste, apagado de fábrica) | F-3.11 |
 | **Copiar el clip** al portapapeles como archivo, con aviso si no entra en Discord o un correo | F-3.12 |
+| **Copiar al guardar**: el clip nuevo queda en el portapapeles sin tocar nada (ajuste, apagado de fábrica) | F-3.17 |
 | **Capturas de pantalla** (PNG junto a los clips, en la misma biblioteca) | F-3.13 |
 
 **Bloqueo transversal: F-2.4 (paridad Windows).** Hoy no existe captura ni
@@ -134,6 +135,13 @@ Cómo quedó:
   FAQ de archivos el 2026-10-12 — 20 MB sin Nitro, 50 MB Nitro Basic; los 25 MB de
   un correo son el límite habitual de Gmail, sin volver a verificar) y el aviso
   «pesa X y no entra en …». Copiar funciona igual: es un aviso, no un error.
+
+**Copiar al guardar (F-3.17):** Configuración → Biblioteca → «Copiar cada clip al
+portapapeles al guardarlo» (apagado de fábrica, porque reemplaza lo que hubieras
+copiado). Con el atajo, la bandeja o el botón, el clip nuevo queda en el
+portapapeles antes de que salga la notificación, que lo dice («copiado al
+portapapeles») o dice por qué no se pudo; un fallo al copiar nunca hace fallar el
+guardado. Las capturas de pantalla no se copian.
 
 Falta: arrastrar el clip desde la ventana hacia otra app (necesita una sesión de
 arrastre nativa; evaluar un plugin de Tauri antes de escribirlo a mano),

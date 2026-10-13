@@ -87,6 +87,18 @@ pub fn parse_access_unit(stream: &[u8]) -> Result<AccessUnit, AnnexBError> {
         return Err(AnnexBError::Empty);
     }
     let mut unit = AccessUnit::default();
+    // Sized once, exactly: this vector goes into the replay buffer and stays
+    // there for minutes, and growing it by doubling would leave up to half of
+    // every packet as unused capacity (tens of MB over a full buffer).
+    unit.data.reserve_exact(
+        ranges
+            .iter()
+            .filter(|&&(begin, _)| {
+                (NAL_SLICE_MIN..=NAL_SLICE_MAX).contains(&(stream[begin] & 0x1F))
+            })
+            .map(|&(begin, end)| 4 + end - begin)
+            .sum(),
+    );
     for (begin, end) in ranges {
         let nal = &stream[begin..end];
         match nal[0] & 0x1F {
@@ -140,6 +152,30 @@ mod tests {
         assert_eq!(unit.sps, vec![SPS.to_vec()]);
         assert_eq!(unit.pps, vec![PPS.to_vec()]);
         assert_eq!(unit.data, avcc(&[&IDR]));
+    }
+
+    #[test]
+    fn a_picture_takes_exactly_the_memory_it_needs() {
+        // Many slices of different sizes: growing the vector slice by slice would
+        // round its capacity up to a power of two.
+        let slices: Vec<Vec<u8>> = (1..=9)
+            .map(|n| {
+                std::iter::once(0x41)
+                    .chain((0..n * 777).map(|i| i as u8))
+                    .collect()
+            })
+            .collect();
+        let parts: Vec<(&[u8], &[u8])> = std::iter::once((LONG, &SPS[..]))
+            .chain(slices.iter().map(|s| (SHORT, s.as_slice())))
+            .collect();
+        let unit = parse_access_unit(&stream(&parts)).unwrap();
+        let wanted: usize = slices.iter().map(|s| 4 + s.len()).sum();
+        assert_eq!(unit.data.len(), wanted);
+        assert_eq!(
+            unit.data.capacity(),
+            unit.data.len(),
+            "no spare room kept in a packet that sits in the buffer for minutes"
+        );
     }
 
     #[test]

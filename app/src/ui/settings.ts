@@ -14,6 +14,7 @@ import {
   formatClipLength,
   formatGain,
   memoryModeText,
+  BUFFER_FOLLOWS_CLIPS,
   micStateSummary,
   shortcutOwners,
   withAddedShortcut,
@@ -473,6 +474,9 @@ export function createSettings(root: HTMLElement): SettingsView {
     changeLibrary({ autoFolders: checked }),
   );
   const autoFoldersRow = liveRow("Archivar cada clip en la carpeta de su juego", autoFoldersSwitch.el);
+  const copySwitch = switchControl("Copiar cada clip al portapapeles al guardarlo", (checked) =>
+    changeLibrary({ copyOnSave: checked }),
+  );
   const libraryPanel = h(
     "section",
     { class: "panel", "aria-labelledby": "library-title" },
@@ -495,6 +499,11 @@ export function createSettings(root: HTMLElement): SettingsView {
         detectSwitch.el,
       ),
       autoFoldersRow.el,
+      row(
+        "Copiar cada clip al portapapeles al guardarlo",
+        "Apenas se guarda un clip (con el atajo, la bandeja o el botón) queda copiado como archivo: lo pegás directo en Discord, un mail o una carpeta. Reemplaza lo que tuvieras copiado. Las capturas de pantalla no se copian.",
+        copySwitch.el,
+      ),
     ),
   );
 
@@ -521,7 +530,13 @@ export function createSettings(root: HTMLElement): SettingsView {
         h("h2", { id: "performance-title" }, "Rendimiento"),
       ),
     ),
-    h("div", { class: "panel-body" }, lowRamRow.el, lowRamWarning),
+    h(
+      "div",
+      { class: "panel-body" },
+      lowRamRow.el,
+      lowRamWarning,
+      h("p", { class: "row-hint muted" }, BUFFER_FOLLOWS_CLIPS),
+    ),
   );
 
   /** Switching it restarts the capture and empties the buffer: ask first. */
@@ -703,6 +718,7 @@ export function createSettings(root: HTMLElement): SettingsView {
     lowRamSwitch.input.checked = settings.performance.lowRam;
     lowRamRow.hint.textContent = memoryModeText(plans, settings.performance.lowRam);
     autoFoldersSwitch.input.checked = settings.library.autoFolders;
+    copySwitch.input.checked = settings.library.copyOnSave;
     autoFoldersSwitch.input.disabled = !settings.library.detectGame;
     autoFoldersRow.hint.textContent =
       "Al guardar un clip lo pone en una carpeta con el nombre de su juego. La crea si no existe; si ya tenés una con ese nombre, la usa tal cual. Los clips que ya tenés no se mueven, y si borrás una de estas carpetas, el próximo clip de ese juego la vuelve a crear." +
@@ -756,6 +772,7 @@ export function createSettings(root: HTMLElement): SettingsView {
         settings = saved;
         renderValues();
       }
+      await refreshPlans();
     } catch (e) {
       toast(String(e), "error");
       settings = lastSaved;
@@ -795,8 +812,19 @@ export function createSettings(root: HTMLElement): SettingsView {
       settings = next;
       lastSaved = next;
       renderValues();
+      void refreshPlans();
     }
   });
+
+  /** The buffer's length follows the clip lengths: ask again what each mode costs. */
+  async function refreshPlans(): Promise<void> {
+    try {
+      plans = await api.memoryPlans();
+    } catch {
+      return; // keep the numbers that are on screen
+    }
+    renderValues();
+  }
 
   async function load(): Promise<void> {
     try {

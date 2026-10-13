@@ -101,9 +101,17 @@ lane; it shares the video's `SharedEpoch` clock. Never mix at save time — that
 would mean decoding and re-encoding.
 
 Memory (`app/src-tauri/src/memory.rs`): the replay buffer's RAM is its length times
-its bitrate (about 180 MB by default); *low RAM mode* (`settings.performance.lowRam`)
-halves both. Fixed when the capture starts, so changing it restarts the capture
-(`Settings::needs_capture_restart`) and the UI warns first.
+its bitrate. The length follows the clips: it only has to hold the longest save
+shortcut (`Settings::longest_clip_seconds`) plus a margin of two GOPs, so with the
+usual 30 s clip it is 34 s, about 50 MB at 12 Mb/s, not a fixed two minutes
+(180 MB, now only the ceiling). It is just an eviction window, so it is resized
+live by `Recorder::apply_live_controls` (shorter gives memory back at once, longer
+fills up as time goes by). *Low RAM mode* (`settings.performance.lowRam`) halves
+the bitrate and the ceiling; the bitrate is fixed when the capture starts, so
+changing the mode restarts the capture (`Settings::needs_capture_restart`) and the
+UI warns first. Things that sit in the buffer for minutes must not carry spare
+capacity (`annexb.rs` sizes each packet exactly), and the clip thumbnails in the
+UI are loaded only near the screen (`ui/lazyvideo.ts`).
 
 Settings (`app/src-tauri/src/settings.rs`): every field has a serde default, one
 validation gate (`Settings::validated`), and an apply path that is either live

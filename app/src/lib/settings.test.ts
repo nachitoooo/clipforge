@@ -12,6 +12,7 @@ import {
   formatMemory,
   gainToDb,
   memoryModeText,
+  BUFFER_FOLLOWS_CLIPS,
   micStateSummary,
   shortcutOwners,
   withAddedShortcut,
@@ -79,9 +80,10 @@ describe("settings helpers", () => {
     expect(original.shortcuts.saveClip).toBe("CommandOrControl+Shift+S");
   });
 
-  it("game detection is on by default, and automatic folders are off", () => {
+  it("game detection is on by default, and automatic folders and copying are off", () => {
     expect(defaultSettings().library.detectGame).toBe(true);
     expect(defaultSettings().library.autoFolders).toBe(false);
+    expect(defaultSettings().library.copyOnSave).toBe(false);
   });
 
   it("patches the library section without touching the rest or the original", () => {
@@ -228,9 +230,15 @@ describe("the screenshot shortcut", () => {
 });
 
 describe("low RAM mode", () => {
+  // With the usual 30 s clip: the buffer holds the clip plus a margin.
   const plans: MemoryPlans = {
-    normal: { bufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 180_000_000 },
-    lowRam: { bufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 45_000_000 },
+    normal: { bufferSeconds: 34, maxBufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 51_000_000 },
+    lowRam: { bufferSeconds: 34, maxBufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 25_500_000 },
+  };
+  // With a 2 min clip: both modes keep all they can.
+  const longClips: MemoryPlans = {
+    normal: { bufferSeconds: 120, maxBufferSeconds: 120, bitrate: 12_000_000, estimatedBytes: 180_000_000 },
+    lowRam: { bufferSeconds: 60, maxBufferSeconds: 60, bitrate: 6_000_000, estimatedBytes: 45_000_000 },
   };
 
   it("is off by default", () => {
@@ -254,13 +262,26 @@ describe("low RAM mode", () => {
   });
 
   it("describes the mode that is on and the other one", () => {
-    const off = memoryModeText(plans, false);
-    expect(off).toBe(
-      "Ahora: 2 min de buffer a 12 Mb/s (unos 180 MB de RAM). Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM), con clips de hasta 1 min y la imagen un poco más blanda en escenas rápidas.",
+    expect(memoryModeText(plans, false)).toBe(
+      "Ahora: 34 s de buffer a 12 Mb/s (unos 51 MB de RAM). Activado: 34 s de buffer a 6 Mb/s (unos 26 MB de RAM). La imagen sería un poco más blanda en escenas rápidas.",
     );
     const on = memoryModeText(plans, true);
-    expect(on.startsWith("Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM) en vez de 2 min")).toBe(true);
-    expect(on).toContain("Los clips duran hasta 1 min, aunque pidas más");
+    expect(on.startsWith("Activado: 34 s de buffer a 6 Mb/s (unos 26 MB de RAM) en vez de 34 s")).toBe(true);
+    expect(on).not.toContain("aunque pidas más");
+  });
+
+  it("says that clips are cut short only when the mode cannot keep what they ask for", () => {
+    const off = memoryModeText(longClips, false);
+    expect(off).toContain("Ahora: 2 min de buffer a 12 Mb/s (unos 180 MB de RAM)");
+    expect(off).toContain("Activado: 1 min de buffer a 6 Mb/s (unos 45 MB de RAM)");
+    expect(off).toContain("Los clips duran hasta 1 min, aunque pidas más");
+    expect(memoryModeText(longClips, true)).toContain("Los clips duran hasta 1 min, aunque pidas más");
+  });
+
+  it("explains that the buffer follows the longest clip", () => {
+    expect(BUFFER_FOLLOWS_CLIPS).toContain("lo que necesita tu clip más largo");
+    expect(BUFFER_FOLLOWS_CLIPS).toContain("no dos minutos fijos");
+    expect(BUFFER_FOLLOWS_CLIPS).toContain("necesita ese tiempo para llenarse");
   });
 
   it("has words even without the numbers", () => {

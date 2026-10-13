@@ -40,6 +40,11 @@ export interface LibrarySettings {
    * by default, and without effect while `detectGame` is off.
    */
   autoFolders: boolean;
+  /**
+   * Put each saved clip on the system clipboard as a file, ready to paste in a
+   * chat. Off by default: it replaces whatever was copied before.
+   */
+  copyOnSave: boolean;
 }
 
 export interface PerformanceSettings {
@@ -71,7 +76,10 @@ export interface Settings {
 
 /** What one memory mode costs; mirrors `memory::PlanInfo` in `src-tauri/src/memory.rs`. */
 export interface PlanInfo {
+  /** What the buffer holds now: the longest clip in Settings plus a margin. */
   bufferSeconds: number;
+  /** The most this mode could ever hold: no clip is longer than this. */
+  maxBufferSeconds: number;
   /** Average video bitrate, bits per second. */
   bitrate: number;
   /** About how much a full buffer weighs, in bytes. */
@@ -124,7 +132,7 @@ export function defaultSettings(): Settings {
       muted: false,
       muteShortcut: DEFAULT_MUTE_SHORTCUT,
     },
-    library: { detectGame: true, autoFolders: false },
+    library: { detectGame: true, autoFolders: false, copyOnSave: false },
     performance: { lowRam: false },
     appearance: { theme: "dark", accent: "#ff7a1a" },
   };
@@ -271,16 +279,29 @@ function describePlan(plan: PlanInfo): string {
   return `${formatClipLength(plan.bufferSeconds)} de buffer a ${formatBitrate(plan.bitrate)} (unos ${formatMemory(plan.estimatedBytes)} de RAM)`;
 }
 
+/** The mode can't keep what the longest clip asks for: clips are cut at its ceiling. */
+function capsClips(plan: PlanInfo): boolean {
+  return plan.bufferSeconds >= plan.maxBufferSeconds;
+}
+
 /** What the low RAM switch does, in words, for the mode that is on now. */
 export function memoryModeText(plans: MemoryPlans | null, lowRam: boolean): string {
   if (plans === null) {
     return "Guarda menos tiempo de video y con menos calidad para ocupar bastante menos RAM.";
   }
   const { normal, lowRam: low } = plans;
+  const cut = capsClips(low) ? ` Los clips duran hasta ${formatClipLength(low.maxBufferSeconds)}, aunque pidas más.` : "";
   return lowRam
-    ? `Activado: ${describePlan(low)} en vez de ${describePlan(normal)}. Los clips duran hasta ${formatClipLength(low.bufferSeconds)}, aunque pidas más, y la imagen es un poco más blanda en escenas rápidas.`
-    : `Ahora: ${describePlan(normal)}. Activado: ${describePlan(low)}, con clips de hasta ${formatClipLength(low.bufferSeconds)} y la imagen un poco más blanda en escenas rápidas.`;
+    ? `Activado: ${describePlan(low)} en vez de ${describePlan(normal)}.${cut} La imagen es un poco más blanda en escenas rápidas.`
+    : `Ahora: ${describePlan(normal)}. Activado: ${describePlan(low)}.${cut} La imagen sería un poco más blanda en escenas rápidas.`;
 }
+
+/**
+ * Why the buffer is as long as it is. It follows the longest save shortcut, so a
+ * longer one is not there at once: the buffer needs time to fill.
+ */
+export const BUFFER_FOLLOWS_CLIPS =
+  "El buffer guarda solo lo que necesita tu clip más largo (el del atajo principal y el de los otros atajos) más unos segundos de margen, no dos minutos fijos. Si alargás un atajo, el buffer necesita ese tiempo para llenarse; si lo acortás, devuelve la memoria enseguida.";
 
 /** A copy of `settings` with the library section patched. */
 export function withLibrary(settings: Settings, patch: Partial<LibrarySettings>): Settings {

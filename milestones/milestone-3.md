@@ -114,7 +114,7 @@ app settings.
 - [x] `memory.rs`: the two modes as plain numbers (length, byte cap, bitrate), the normal one equal to the engine's defaults, an estimate of what a full buffer weighs; `ReplayBuffer::set_config` resizes a buffer (a smaller window drops whole GOPs at once)
 - [x] `settings.performance.lowRam` (off by default, old files get it off); applied when the capture starts on macOS and on Windows (bitrate and buffer); changing it restarts the video capture and empties the buffer, only if the buffer is running
 - [x] Settings: a panel with the switch, the real numbers of both modes (asked to the backend, so there is one source of truth), and a confirmation before anything changes — cancel leaves it as it was
-- [ ] Manual check in the app: switch it on and off, see the restart, watch the memory in Activity Monitor / Task Manager while recording (this was only estimated from the code: ~350–500 MB in total at 1080p60 normal)
+- [ ] Manual check in the app: switch it on and off, see the restart, watch the memory in Activity Monitor / Task Manager while recording (measured since, on macOS, see F-3.18: the whole app was ~190–215 MB on a quiet desktop, with the window open and a two-minute buffer)
 - [ ] Not yet: a free choice of buffer length and quality (the wave 1 settings), and a bitrate that adapts to the screen size
 
 ## F-3.15 — Visual pass
@@ -146,6 +146,35 @@ app settings.
 - [x] Looked at in headless Chrome over a mock backend: dark and light, orange / blue / green, the lists open, filters on, the editor, a dialog, and `system` with the OS switched both ways
 - [ ] Manual check in the real app (WebView2 and WKWebView): the theme and color change, the lists near the window's edge, `system` when the OS theme changes
 - [ ] Not yet: the two selects in Settings (microphone, clip length) are still the browser's; the system's own title bar and the tray menu do not follow the theme
+
+## F-3.17 — Copy each clip when it is saved
+> **Progress (2026-10-12):** implemented. Settings → Biblioteca → «Copiar cada clip
+> al portapapeles al guardarlo»: when a clip is saved (shortcut, tray or button) it is
+> already on the clipboard as a file, ready to paste in Discord, Mail or a folder.
+> Off by default, because it replaces whatever was copied before.
+- [x] `settings.library.copyOnSave` (default off, old files get it off, never restarts the capture); a Settings switch with a note that it replaces the clipboard and that screenshots are not copied
+- [x] `AppActions::save_clip` copies the new file after the clip is registered, the same path for the hotkey, the tray and the button; `dispatch::CopyOutcome::attempt` only runs the copy when asked, and a copy that fails is reported in the notification («no se pudo copiar: …») and never fails the save; `saved_description` builds the text («30 s → clip.mp4 · copiado al portapapeles»)
+  — Rust tests (the copy is not run when off, its reason is kept when it fails, the three texts, the setting's default / old file / persistence / JSON name) and simulated-DOM tests; `copy_file` itself was verified against the real macOS pasteboard in F-3.12
+- [ ] Manual check in the app: switch it on, save with the shortcut, the tray and the button, paste in Discord and in a Finder folder (the wiring in `lib.rs` has no test of its own: it needs a running Tauri app)
+- [ ] Windows: `CF_HDROP` never run (F-2.4)
+- [ ] Not yet: copying screenshots too, an option «abrir la carpeta» after saving
+
+## F-3.18 — Less RAM
+> **Progress (2026-10-12):** implemented and measured on macOS. The replay buffer
+> is no longer a fixed two minutes: it holds what the longest save shortcut needs
+> plus a margin of two GOPs (34 s with the usual 30 s clip). Measured with the real
+> screen and the real engine, a busy screen at 1080p60 (a temporary probe, not kept
+> in the repo), 150 s each: a 120 s buffer held 175.5 MB of video (11.9 Mb/s) and the
+> process footprint reached ~250 MB; a 34 s buffer held 47.3 MB and the footprint
+> stayed at 76–95 MB, about 160 MB less. The clip you get is the same.
+- [x] `memory::MemoryPlan::sized_for`: buffer = longest clip + 4 s (never less than 10 s, never more than the mode's ceiling: 2 min, or 1 min in low RAM); the byte cap shrinks with it but stays at twice what the buffer should weigh, still a safety net; `Settings::longest_clip_seconds` takes the main shortcut and the extra ones
+- [x] Applied live: `Recorder::apply_live_controls` resizes the eviction window when a clip length changes (shorter gives memory back at once, longer fills as time goes by) and when the capture starts; no restart. `memory_plans` takes the settings so the Rendimiento panel shows the real numbers, asks again after a change, and says why the buffer is as long as it is
+- [x] Windows packets: `annexb::parse_access_unit` sized each picture by growing a vector, which left up to half of every packet as unused capacity; now one exact allocation (the new test fails without it: 50 048 bytes of capacity for 35 010 of data)
+- [x] Clip thumbnails (`ui/lazyvideo.ts`): a `<video>` per card stayed loaded for ever once scrolled to, a few MB each (the first dozen cost ~44 MB in the real window: 38 → 82 MB with 40 clips). They now load 400 px from the scroller and unload 1600 px away; checked in headless Chrome with 80 clips (never more than 30 loaded, always a picture on the cards that show)
+- [x] Tried and dropped: ScreenCaptureKit's `queueDepth` 8 → 3 changed no measurable footprint (the dirty IOSurface memory was 11 MB in both runs) and risked dropped frames
+- [ ] Windows: not measured (the packet fix is unit-tested and compiled by the CI cross-check)
+- [ ] Manual check with a real game and Activity Monitor / Task Manager
+- [ ] Not yet: a frame pool for the raw frames (each 8 MB frame is allocated and freed 60 times a second), capturing in NV12 on macOS (a third of the bytes of BGRA), thumbnails as small pictures instead of paused videos, a fixed buffer length chosen by the user
 
 ## F-3.3 — Settings foundation + microphone
 > **Progress (2026-10-09, branch `feat/3/settings-microphone`):** implemented

@@ -14,7 +14,7 @@ use clipforge_core::audio::mic::{
     list_input_devices, mic_audio_config, CpalMicSource, MicControls,
 };
 use clipforge_core::audio::{AudioConfig, AudioEncoder, MicMode as CoreMicMode};
-use clipforge_core::buffer::BufferConfig;
+use clipforge_core::buffer::{BufferConfig, ReplayBuffer};
 use clipforge_core::capture::AudioSource;
 use clipforge_core::clip::{ClipService, SavedClip};
 use clipforge_core::engine::CaptureEngine;
@@ -46,6 +46,9 @@ struct MicRuntime {
 
 pub struct Recorder {
     engine: Mutex<CaptureEngine>,
+    /// The engine's replay buffer, kept here so resizing it never waits for the
+    /// engine lock (held while a capture starts).
+    buffer: Arc<Mutex<ReplayBuffer>>,
     clips: Arc<ClipService>,
     last_start_error: Mutex<Option<String>>,
     settings: Arc<SettingsStore>,
@@ -90,6 +93,7 @@ impl Recorder {
         let current = settings.get();
         let mic = current.microphone;
         Self {
+            buffer: engine.buffer(),
             engine: Mutex::new(engine),
             clips,
             last_start_error: Mutex::new(None),
@@ -124,18 +128,23 @@ impl Recorder {
         self.clips.clips_dir().to_path_buf()
     }
 
-    /// How much RAM the buffer may take under the current settings.
+    /// How much RAM the buffer may take under the current settings: the mode's
+    /// bitrate and a length that covers the longest clip, no more.
     pub fn memory_plan(&self) -> MemoryPlan {
-        memory::plan(self.settings.get().performance.low_ram)
+        let settings = self.settings.get();
+        memory::plan(
+            settings.performance.low_ram,
+            settings.longest_clip_seconds(),
+        )
     }
 
-    /// Size the replay buffer for the current memory mode. Called as the capture
-    /// starts: the bitrate and the length are fixed for the whole run.
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    /// Size the replay buffer for the current settings. Called as the capture
+    /// starts (the bitrate is fixed for the whole run) and again whenever a clip
+    /// length changes: the length is only an eviction window, so a shorter one
+    /// gives memory back at once and a longer one fills up as time goes by.
     fn apply_memory_plan(&self) -> MemoryPlan {
         let plan = self.memory_plan();
-        let buffer = self.engine.lock().expect("engine lock").buffer();
-        buffer
+        self.buffer
             .lock()
             .expect("replay buffer lock")
             .set_config(plan.buffer_config());
@@ -340,8 +349,9 @@ impl Recorder {
         self.mic_status()
     }
 
-    /// Volume and mute only: atomics, instant, safe from any thread.
+    /// Volume, mute and the buffer's length: instant, safe from any thread.
     pub fn apply_live_controls(&self) {
+        self.apply_memory_plan();
         let settings = self.settings.get();
         let wanted = settings.microphone;
         self.mic_controls
@@ -646,29 +656,48 @@ mod tests {
 
     #[test]
     fn the_memory_plan_follows_the_setting() {
-        assert_eq!(recorder().memory_plan(), memory::NORMAL);
+        assert_eq!(
+            recorder().memory_plan(),
+            memory::plan(false, crate::settings::DEFAULT_CLIP_SECONDS)
+        );
         assert_eq!(
             recorder_with(low_ram_settings()).memory_plan(),
-            memory::LOW_RAM
+            memory::plan(true, crate::settings::DEFAULT_CLIP_SECONDS)
         );
     }
 
     fn buffer_config(recorder: &Recorder) -> clipforge_core::buffer::BufferConfig {
-        let buffer = recorder.engine.lock().unwrap().buffer();
-        let config = buffer.lock().unwrap().config().clone();
+        let config = recorder.buffer.lock().unwrap().config().clone();
         config
     }
 
     #[test]
-    fn starting_sizes_the_replay_buffer_for_the_mode() {
+    fn starting_sizes_the_replay_buffer_for_the_clips_and_the_mode() {
+        // The usual 30 s clip: 34 s of buffer, not the ceiling of two minutes.
         let normal = recorder();
-        normal.apply_memory_plan();
+        let plan = normal.apply_memory_plan();
+        assert_eq!(plan.buffer_seconds, 30 + memory::MARGIN_SECONDS);
         assert_eq!(
             buffer_config(&normal).max_duration,
-            Duration::from_secs(120)
+            Duration::from_secs(plan.buffer_seconds)
         );
+        assert_eq!(buffer_config(&normal).max_bytes, plan.buffer_max_bytes);
 
         let low = recorder_with(low_ram_settings());
+        let low_plan = low.apply_memory_plan();
+        assert_eq!(low_plan.bitrate, memory::LOW_RAM.bitrate);
+        assert_eq!(
+            low_plan.buffer_seconds, plan.buffer_seconds,
+            "same clips, same length"
+        );
+        assert!(buffer_config(&low).max_bytes < buffer_config(&normal).max_bytes);
+    }
+
+    #[test]
+    fn low_ram_still_stops_a_long_clip_at_its_ceiling() {
+        let mut settings = low_ram_settings();
+        settings.shortcuts.clip_seconds = 120;
+        let low = recorder_with(settings);
         let plan = low.apply_memory_plan();
         assert_eq!(plan, memory::LOW_RAM);
         let config = buffer_config(&low);
@@ -677,16 +706,49 @@ mod tests {
     }
 
     #[test]
-    fn turning_the_mode_off_again_gives_the_full_buffer_back() {
+    fn turning_the_mode_off_again_gives_the_full_bitrate_back() {
         let recorder = recorder_with(low_ram_settings());
         recorder.apply_memory_plan();
         let mut back = Settings::default();
         back.performance.low_ram = false;
         recorder.settings.replace(back).unwrap();
-        recorder.apply_memory_plan();
+        let plan = recorder.apply_memory_plan();
+        assert_eq!(plan.bitrate, memory::NORMAL.bitrate);
         assert_eq!(
             buffer_config(&recorder).max_duration,
-            Duration::from_secs(120)
+            Duration::from_secs(plan.buffer_seconds)
+        );
+    }
+
+    #[test]
+    fn changing_a_clip_length_resizes_the_buffer_without_a_restart() {
+        let recorder = recorder();
+        recorder.apply_live_controls();
+        assert_eq!(
+            buffer_config(&recorder).max_duration,
+            Duration::from_secs(34)
+        );
+
+        let mut longer = Settings::default();
+        longer.shortcuts.clip_seconds = 90;
+        recorder.settings.replace(longer.clone()).unwrap();
+        recorder.apply_live_controls();
+        assert_eq!(
+            buffer_config(&recorder).max_duration,
+            Duration::from_secs(94)
+        );
+
+        // A second shortcut asking for more than the main one counts too.
+        longer.shortcuts.clip_seconds = 20;
+        longer.shortcuts.extra_save_clip = vec![crate::settings::ClipShortcut {
+            accelerator: "F9".into(),
+            seconds: 60,
+        }];
+        recorder.settings.replace(longer).unwrap();
+        recorder.apply_live_controls();
+        assert_eq!(
+            buffer_config(&recorder).max_duration,
+            Duration::from_secs(64)
         );
     }
 }
